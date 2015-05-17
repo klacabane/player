@@ -4,15 +4,126 @@ import (
 	"container/ring"
 	"io/ioutil"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	ui "github.com/gizak/termui"
 )
 
-const DATA_DIR = "data"
+var DATA_DIR string
 
-var player *AudioPlayer
+var plyr *AudioPlayer
+
+func init() {
+	u, err := user.Current()
+	if err != nil {
+		panic(err)
+	}
+
+	DATA_DIR = u.HomeDir + "/Dropbox/player/data/"
+}
+
+const (
+	PLAY Action = iota
+	PAUSE
+	RESUME
+	STOP
+)
+
+type AudioPlayer struct {
+	tracks []*Track
+	pos    int
+	repeat bool
+	ch     chan Action
+}
+
+type Action int
+
+func NewAudioPlayer() *AudioPlayer {
+	p := &AudioPlayer{
+		ch: make(chan Action, 1),
+	}
+	go p.run()
+
+	return p
+}
+
+func (p *AudioPlayer) run() {
+	var cmd *exec.Cmd
+
+	for {
+		switch <-p.ch {
+		case PLAY:
+			if cmd != nil {
+				if err := cmd.Process.Kill(); err != nil {
+					continue
+				}
+			}
+			cmd = exec.Command("afplay", p.tracks[p.pos].path)
+			go func() {
+				if err := cmd.Start(); err != nil {
+					return
+				}
+				state, err := cmd.Process.Wait()
+				if err != nil || !state.Success() {
+					return
+				}
+
+				if p.pos < len(p.tracks)-1 {
+					p.pos++
+					p.Play()
+				} else {
+					p.Stop()
+				}
+			}()
+		case PAUSE:
+			if cmd != nil {
+				cmd.Process.Signal(syscall.SIGSTOP)
+			}
+		case RESUME:
+			if cmd != nil {
+				cmd.Process.Signal(syscall.SIGCONT)
+			}
+		case STOP:
+			if cmd != nil {
+				if err := cmd.Process.Kill(); err != nil {
+				}
+				cmd = nil
+			}
+		}
+	}
+}
+
+func (p *AudioPlayer) Set(t []*Track, start int) {
+	p.tracks = t
+	p.pos = start
+}
+
+func (p *AudioPlayer) Play() {
+	p.ch <- PLAY
+}
+
+func (p *AudioPlayer) Pause() {
+	p.ch <- PAUSE
+}
+
+func (p *AudioPlayer) Resume() {
+	p.ch <- RESUME
+}
+
+func (p *AudioPlayer) Stop() {
+	p.ch <- STOP
+}
+
+func (p *AudioPlayer) Prev() error {
+	return nil
+}
+
+func (p *AudioPlayer) Next() error {
+	return nil
+}
 
 func walk() []*Playlist {
 	var pl []*Playlist
@@ -29,8 +140,8 @@ func walk() []*Playlist {
 		}
 		for _, f := range files {
 			p.Tracks = append(p.Tracks, &Track{
-				Name: strings.TrimSuffix(f.Name(), filepath.Ext(f.Name())),
-				Path: filepath.Join(DATA_DIR, p.Name, f.Name()),
+				name: strings.TrimSuffix(f.Name(), filepath.Ext(f.Name())),
+				path: filepath.Join(DATA_DIR, p.Name, f.Name()),
 			})
 		}
 		pl = append(pl, p)
@@ -42,6 +153,7 @@ func main() {
 	if err := ui.Init(); err != nil {
 		panic(err)
 	}
+	plyr = NewAudioPlayer()
 
 	playlists := walk()
 	pl := NewPlaylistCmp(playlists)
@@ -50,39 +162,6 @@ func main() {
 	view.eventCh = ui.EventCh()
 
 	view.Render()
-}
-
-type AudioPlayer struct {
-	tracks []*Track
-	track  *Track
-	repeat bool
-}
-
-func (p *AudioPlayer) Set(tracks []*Track, start int) {
-	p.tracks = tracks
-}
-
-func (p *AudioPlayer) Play() error {
-	cmd := exec.Command("afplay", p.track.Path)
-	return cmd.Start()
-}
-
-func (p *AudioPlayer) Pause() error {
-	// kill -17 pid @pause
-	// kill -19 pid @resume
-	return nil
-}
-
-func (p *AudioPlayer) Stop() error {
-	return nil
-}
-
-func (p *AudioPlayer) Prev() error {
-	return nil
-}
-
-func (p *AudioPlayer) Next() error {
-	return nil
 }
 
 type View struct {
@@ -108,7 +187,7 @@ func cmpRing(cmp Component) *ring.Ring {
 	if cmp == nil {
 		return nil
 	}
-	r := new(ring.Ring) //ring.New(1)
+	r := new(ring.Ring)
 	r.Value = cmp
 	if cmp.Child() != nil {
 		r.Link(cmpRing(cmp.Child()))
@@ -150,12 +229,17 @@ func (v *View) Render() {
 
 type Playlist struct {
 	Name   string
-	Tracks []*Track // doubly linked list?
+	Tracks []*Track
+	Pos    int
 }
 
 type Track struct {
-	Name string
-	Path string
+	name string
+	path string
+}
+
+func (t *Track) Path() string {
+	return t.path
 }
 
 type Component interface {
@@ -226,8 +310,10 @@ func (c *PlaylistCmp) Handle(e ui.Event) {
 	if e.Type == ui.EventKey && e.Key == ui.KeyEnter {
 		trackCmp := c.child.(*TrackCmp)
 		trackCmp.current = 0
+
 		pl := c.playlists[c.current]
 		trackCmp.tracks = pl.Tracks
+
 		names := make([]string, len(pl.Tracks))
 		for i, t := range pl.Tracks {
 			var pre string
@@ -236,11 +322,10 @@ func (c *PlaylistCmp) Handle(e ui.Event) {
 			} else {
 				pre = "[ ] "
 			}
-			names[i] = pre + t.Name
+			names[i] = pre + t.name
 		}
 		trackCmp.Items = names
 	}
-
 }
 
 type TrackCmp struct {
@@ -268,7 +353,7 @@ func NewTrackCmp(tracks []*Track) *TrackCmp {
 		} else {
 			pre = "[ ] "
 		}
-		c.Items = append(c.Items, pre+tr.Name)
+		c.Items = append(c.Items, pre+tr.name)
 	}
 	return c
 }
@@ -305,25 +390,22 @@ func (c *TrackCmp) Handle(e ui.Event) {
 		c.Items[c.current] = strings.Replace(c.Items[c.current], " ", "-", 1)
 	}
 	if e.Type == ui.EventKey && e.Key == ui.KeyEnter {
-		_ = exec.Command("afplay", c.tracks[c.current].Path).Run()
+		plyr.Set(c.tracks, c.current)
+		plyr.Play()
 	}
 
+	if e.Ch == 'p' {
+		plyr.Pause()
+	} else if e.Ch == 'r' {
+		plyr.Resume()
+	} else if e.Ch == 's' {
+		plyr.Stop()
+	}
 }
 
 type ControlsCmp struct {
 	controls []func() error
 	current  int
-}
-
-func NewControlsCmp() *ControlsCmp {
-	return &ControlsCmp{
-		[]func() error{
-			player.Play,
-			player.Pause,
-			player.Stop,
-		},
-		0,
-	}
 }
 
 func (c *ControlsCmp) Handle(e ui.Event) {
