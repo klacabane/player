@@ -1,8 +1,6 @@
 package search
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 
 	"code.google.com/p/google-api-go-client/googleapi/transport"
@@ -11,14 +9,12 @@ import (
 
 const API_KEY = "AIzaSyBIM-dPY4ky7YAk4jLSgkf4axlTzzvFSlU"
 
-var MAX_RESULTS int64 = 10
-
 type Result struct {
 	Url   string
 	Title string
 }
 
-func Do(term string) ([]Result, error) {
+func Do(term string, max int64) ([]Result, error) {
 	client := &http.Client{
 		Transport: &transport.APIKey{Key: API_KEY},
 	}
@@ -30,13 +26,18 @@ func Do(term string) ([]Result, error) {
 
 	call := service.Search.List("id,snippet").
 		Q(term).
-		MaxResults(MAX_RESULTS)
+		MaxResults(max)
 	resp, err := call.Do()
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range resp.Items {
-		fmt.Println(item.Snippet.Title)
+
+	ret := make([]Result, len(resp.Items))
+	for i, item := range resp.Items {
+		ret[i] = Result{
+			Url:   "http://youtube.com/watch?v=" + item.Id.VideoId,
+			Title: item.Snippet.Title,
+		}
 	}
-	return nil, errors.New("not implemented")
+	return ret, nil
 }

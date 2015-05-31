@@ -7,6 +7,7 @@ import (
 
 type Playlist struct {
 	Name   string
+	Path   string
 	Tracks []*Track
 }
 

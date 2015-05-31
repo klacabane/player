@@ -2,6 +2,7 @@ package main
 
 import (
 	"container/ring"
+	"os/exec"
 	"strings"
 
 	"github.com/gizak/termui"
@@ -23,8 +24,8 @@ func NewView(cmp ...Component) *View {
 	v.eventCh = termui.EventCh()
 	for i, c := range cmp {
 		if i == 0 {
-			c.Focus(true)
 			v.component = cmpRing(c)
+			c.Focus(true)
 		} else {
 			v.component = v.component.Move(v.component.Len() - 1)
 			v.component = v.component.Link(cmpRing(c))
@@ -37,7 +38,11 @@ func (v *View) Current() Component {
 	return v.component.Value.(Component)
 }
 
-func (v *View) PrevComponent() {
+func (v *View) Prev() {
+	if v.component == v.component.Prev() {
+		return
+	}
+
 	v.component.Value.(Component).Focus(false)
 	for {
 		if v.component = v.component.Prev(); v.component.Value.(Component).Targetable() {
@@ -48,6 +53,10 @@ func (v *View) PrevComponent() {
 }
 
 func (v *View) NextComponent() {
+	if v.component == v.component.Prev() {
+		return
+	}
+
 	v.component.Value.(Component).Focus(false)
 	for {
 		if v.component = v.component.Next(); v.component.Value.(Component).Targetable() {
@@ -95,6 +104,7 @@ func cmpRing(cmp Component) *ring.Ring {
 	if cmp == nil {
 		return nil
 	}
+	cmp.Focus(false)
 
 	r := new(ring.Ring)
 	r.Value = cmp
@@ -251,7 +261,7 @@ type TrackCmp struct {
 	VerticalList
 
 	tracks []*Track
-	child  Component
+	child  *ActionMenuCmp
 }
 
 func (tr *TrackCmp) Targetable() bool { return true }
@@ -261,7 +271,7 @@ func NewTrackCmp(tracks []*Track) *TrackCmp {
 	c := &TrackCmp{
 		VerticalList{List: termui.NewList()},
 		tracks,
-		NewTrackMenuCmp(tracks[0]),
+		NewActionMenuCmp([]string{"move to", "delete"}, []ActionFunc{}),
 	}
 	c.Focus(false)
 	c.Width = 35
@@ -305,51 +315,9 @@ func (c *TrackCmp) Handle(e termui.Event) {
 	} else if e.Ch == 's' {
 		player.Stop()
 	} else if e.Ch == 'o' {
-		c.child.(*TrackMenuCmp).visible = true
+		c.child.visible = true
 	}
 }
-
-type TrackMenuCmp struct {
-	VerticalList
-
-	track   *Track
-	visible bool
-}
-
-func NewTrackMenuCmp(t *Track) *TrackMenuCmp {
-	cmp := &TrackMenuCmp{
-		VerticalList: VerticalList{List: termui.NewList()},
-		track:        t,
-	}
-	cmp.Width = 15
-	cmp.Height = 5
-	cmp.X = 65
-	cmp.Focus(false)
-	cmp.Set([]string{"move to", "delete", "cancel"})
-	return cmp
-}
-
-func (c *TrackMenuCmp) Focus(focus bool) {
-	if focus {
-		c.Border.FgColor = termui.ColorWhite
-	} else {
-		c.Border.FgColor = termui.ColorBlack
-	}
-}
-func (c *TrackMenuCmp) Handle(e termui.Event) {
-	if e.Type == termui.EventKey && e.Key == termui.KeyArrowUp {
-		c.Prev()
-	}
-	if e.Type == termui.EventKey && e.Key == termui.KeyArrowDown {
-		c.Next()
-	}
-	if e.Type == termui.EventKey && e.Key == termui.KeyEnter {
-		c.visible = false
-	}
-}
-func (c *TrackMenuCmp) Targetable() bool { return c.visible }
-func (c *TrackMenuCmp) Visible() bool    { return c.visible }
-func (c *TrackMenuCmp) Child() Component { return nil }
 
 type DisplayCmp struct {
 	*termui.Par
@@ -372,10 +340,14 @@ func NewDisplayCmp() *DisplayCmp {
 
 type SearchCmp struct {
 	*termui.Par
+	child *SearchResultCmp
 }
 
 func NewSearchCmp() *SearchCmp {
-	cmp := &SearchCmp{termui.NewPar("")}
+	cmp := &SearchCmp{
+		termui.NewPar(""),
+		NewSearchResultCmp(),
+	}
 	cmp.Border.Label = "search"
 	cmp.Width = 40
 	cmp.Height = 3
@@ -393,11 +365,17 @@ func (c *SearchCmp) Focus(focus bool) {
 }
 func (c *SearchCmp) Handle(e termui.Event) {
 	if e.Key == termui.KeyEnter {
-		_, err := search.Do(c.Text)
+		var err error
+		c.child.results, err = search.Do(c.Text, 20)
 		if err != nil {
 			return
 		}
 
+		titles := make([]string, len(c.child.results))
+		for i, res := range c.child.results {
+			titles[i] = res.Title
+		}
+		c.child.Set(titles)
 		return
 	}
 	if e.Key == termui.KeySpace {
@@ -414,4 +392,112 @@ func (c *SearchCmp) Handle(e termui.Event) {
 }
 func (c *SearchCmp) Targetable() bool { return true }
 func (c *SearchCmp) Visible() bool    { return true }
-func (c *SearchCmp) Child() Component { return nil }
+func (c *SearchCmp) Child() Component { return c.child }
+
+type SearchResultCmp struct {
+	VerticalList
+	results []search.Result
+	child   *ActionMenuCmp
+}
+
+func NewSearchResultCmp() *SearchResultCmp {
+	c := &SearchResultCmp{
+		VerticalList{List: termui.NewList()},
+		nil,
+		nil,
+	}
+	c.child = NewActionMenuCmp([]string{"download", "open"}, []ActionFunc{
+		func(index int) error {
+			name, err := download(c.results[c.current].Url)
+			if err != nil {
+				return err
+			}
+			println(name)
+			return nil
+		},
+		func(index int) error {
+			return exec.Command("open", c.results[c.current].Url).Run()
+		},
+	})
+	c.Focus(false)
+	c.Width = 30
+	c.Height = HEIGHT
+	c.Y = 20
+	return c
+}
+
+func (c *SearchResultCmp) Targetable() bool { return true }
+func (c *SearchResultCmp) Visible() bool    { return true }
+func (c *SearchResultCmp) Child() Component { return c.child }
+
+func (c *SearchResultCmp) Focus(focus bool) {
+	if focus {
+		c.Border.FgColor = termui.ColorWhite
+	} else {
+		c.Border.FgColor = termui.ColorBlack
+	}
+}
+
+func (c *SearchResultCmp) Handle(e termui.Event) {
+	if e.Type == termui.EventKey && e.Key == termui.KeyArrowUp {
+		c.Prev()
+	}
+	if e.Type == termui.EventKey && e.Key == termui.KeyArrowDown {
+		c.Next()
+	}
+	if e.Type == termui.EventKey && e.Key == termui.KeyEnter {
+		c.child.visible = true
+	}
+}
+
+type ActionFunc func(int) error
+
+type ActionMenuCmp struct {
+	VerticalList
+	actions []ActionFunc
+	visible bool
+}
+
+func NewActionMenuCmp(labels []string, actions []ActionFunc) *ActionMenuCmp {
+	c := &ActionMenuCmp{
+		VerticalList{List: termui.NewList()},
+		actions,
+		false,
+	}
+	c.Focus(false)
+	c.Width = 15
+	c.Height = 5
+	c.X = 30
+	c.Y = 20
+	c.Set(labels)
+
+	return c
+}
+
+func (c *ActionMenuCmp) Targetable() bool { return c.visible }
+func (c *ActionMenuCmp) Visible() bool    { return c.visible }
+func (c *ActionMenuCmp) Child() Component { return nil }
+
+func (c *ActionMenuCmp) Focus(focus bool) {
+	if focus {
+		c.Border.FgColor = termui.ColorWhite
+	} else {
+		c.Border.FgColor = termui.ColorBlack
+	}
+}
+
+func (c *ActionMenuCmp) Handle(e termui.Event) {
+	if e.Type == termui.EventKey && e.Key == termui.KeyArrowUp {
+		c.Prev()
+	}
+	if e.Type == termui.EventKey && e.Key == termui.KeyArrowDown {
+		c.Next()
+	}
+	if e.Type == termui.EventKey && e.Key == termui.KeyEnter {
+		err := c.actions[c.current](0)
+		if err != nil {
+			println(err)
+			return
+		}
+	}
+}
