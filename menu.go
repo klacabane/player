@@ -2,22 +2,40 @@ package main
 
 import "github.com/gizak/termui"
 
+type Component interface {
+	Handle(termui.Event)
+	Child() Component
+	Focus(bool)
+	Targetable() bool
+	Visible() bool
+}
+
+type ActionFunc func(Component, int) error
+
+type eventListener struct {
+	Key map[termui.Key]ActionFunc
+	Ch  map[rune]ActionFunc
+}
+
 type MenuConf struct {
 	Labels  []string
-	Actions []ActionFunc
+	Key     map[termui.Key]ActionFunc
+	Ch      map[rune]ActionFunc
 	Width   int
 	Height  int
 	X       int
 	Y       int
 	Visible bool
+	Data    interface{}
 	Child   Component
-	Items   []interface{}
 }
 
 type Menu struct {
 	VerticalList
-	Actions []ActionFunc
-	items   []interface{}
+	eventListener
+
+	Data interface{}
+
 	visible bool
 	child   Component
 }
@@ -25,21 +43,27 @@ type Menu struct {
 func NewMenu(conf MenuConf) *Menu {
 	m := &Menu{
 		VerticalList: VerticalList{List: termui.NewList()},
-		Actions:      conf.Actions,
-		visible:      conf.Visible,
-		child:        conf.Child,
+		eventListener: eventListener{
+			Key: conf.Key,
+			Ch:  conf.Ch,
+		},
+		Data:    conf.Data,
+		visible: conf.Visible,
+		child:   conf.Child,
 	}
-	m.Set(conf.Labels)
 	m.Width = conf.Width
 	m.Height = conf.Height
 	m.X = conf.X
 	m.Y = conf.Y
 
+	m.Set(conf.Labels)
 	return m
 }
 
 func (c *Menu) Targetable() bool { return c.visible }
-func (c *Menu) Visible() bool    { return c.visible }
+
+func (c *Menu) Visible() bool { return c.visible }
+
 func (c *Menu) Child() Component { return c.child }
 
 func (c *Menu) Focus(focus bool) {
@@ -57,21 +81,10 @@ func (c *Menu) Handle(e termui.Event) {
 	if e.Type == termui.EventKey && e.Key == termui.KeyArrowDown {
 		c.Next()
 	}
-	if e.Type == termui.EventKey && e.Key == termui.KeyEnter {
-		c.do()
+	if fn, ok := c.Key[e.Key]; ok {
+		fn(c, c.current)
 	}
-}
-
-func (m *Menu) do() error {
-	if len(m.Actions) == 0 {
-		return nil
+	if fn, ok := c.Ch[e.Ch]; ok {
+		fn(c, c.current)
 	}
-
-	var a ActionFunc
-	if len(m.Actions) == 1 {
-		a = m.Actions[0]
-	} else {
-		a = m.Actions[m.current]
-	}
-	return a(m.current)
 }

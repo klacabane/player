@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gizak/termui"
+	"github.com/klacabane/player/search"
 )
 
 var (
@@ -32,60 +33,122 @@ func main() {
 	data_dir = "/Users/wopa/Dropbox/player/data/"
 
 	playlists := walk(data_dir)
-	names := make([]string, len(playlists))
+	plnames := make([]string, len(playlists))
 	for i, p := range playlists {
-		names[i] = p.Name
+		plnames[i] = p.Name
+	}
+	trnames := make([]string, len(playlists[0].Tracks))
+	for i, t := range playlists[0].Tracks {
+		trnames[i] = t.Name
 	}
 
-	_ = NewMenu(MenuConf{
-		Labels: []string{"delete"},
-		Actions: []ActionFunc{
-			func(index int) error {
-				return nil
-			},
-		},
-	})
-
-	playlistm := NewMenu(MenuConf{
-		Labels:  names,
-		Y:       35,
+	menu := NewMenu(MenuConf{
+		Labels:  plnames,
 		Width:   30,
 		Height:  HEIGHT,
 		Visible: true,
-		Child: NewMenu(MenuConf{
-			Labels: []string{"hey", "dood"},
-			Actions: []ActionFunc{
-				func(index int) error {
-					return nil
-				},
+		Data:    playlists,
+		Key: map[termui.Key]ActionFunc{
+			termui.KeyEnter: func(c Component, index int) error {
+				self, child := c.(*Menu), c.Child().(*Menu)
+				p := self.Data.([]*Playlist)[index]
+
+				names := make([]string, len(p.Tracks))
+				for i, t := range p.Tracks {
+					names[i] = t.Name
+				}
+				child.Set(names)
+				child.Data = p.Tracks
+				return nil
 			},
-			Y:       35,
+		},
+		Child: NewMenu(MenuConf{
+			Labels:  trnames,
 			X:       30,
 			Width:   35,
 			Height:  HEIGHT,
 			Visible: true,
+			Data:    playlists[0].Tracks,
+			Key: map[termui.Key]ActionFunc{
+				termui.KeyEnter: func(c Component, index int) error {
+					tracks := c.(*Menu).Data.([]*Track)
+					player.Init(tracks, index)
+					return nil
+				},
+			},
+			Ch: map[rune]ActionFunc{
+				'o': func(c Component, index int) error {
+					c.Child().(*Menu).visible = true
+					c.Child().(*Menu).Data = c.(*Menu).Data.([]*Track)[index]
+					return nil
+				},
+			},
+			Child: NewMenu(MenuConf{
+				Labels: []string{"move to", "delete"},
+				Y:      35,
+				X:      65,
+				Width:  15,
+				Height: 4,
+				Key: map[termui.Key]ActionFunc{
+					termui.KeyEnter: func(c Component, index int) error {
+						switch index {
+						case 0:
+						case 1:
+						}
+						return nil
+					},
+				},
+				Ch: map[rune]ActionFunc{
+					'q': func(c Component, index int) error {
+						c.(*Menu).visible = false
+						return nil
+					},
+				},
+			}),
 		}),
 	})
-	playlistm.Actions = []ActionFunc{
-		func(index int) error {
-			p := playlists[index]
-			c := playlistm.Child().(*Menu)
-			names := make([]string, len(p.Tracks))
-			for i, t := range p.Tracks {
-				names[i] = t.Name
+
+	input := NewInput(InputConf{
+		Label:   "search",
+		Width:   40,
+		Height:  3,
+		Y:       HEIGHT,
+		Visible: true,
+		OnSubmit: func(c Component, val string) {
+			res, err := search.Do(val, 20)
+			if err != nil {
+				return
 			}
-			c.Set(names)
-			return nil
+
+			titles := make([]string, len(res))
+			for i, r := range res {
+				titles[i] = r.Title
+			}
+			c.Child().(*Menu).Set(titles)
+			c.Child().(*Menu).Data = res
 		},
-	}
+		Child: NewMenu(MenuConf{
+			Y:       HEIGHT + 3,
+			Width:   30,
+			Height:  HEIGHT,
+			Visible: true,
+			Key: map[termui.Key]ActionFunc{
+				termui.KeyEnter: func(c Component, index int) error {
+					c.Child().(*Menu).visible = true
+					c.(*Menu).Data = c.(*Menu).Data.([]Result)[index]
+				},
+			},
+			Child: NewMenu(MenuConf{
+				Y:      HEIGHT + 3,
+				X:      30,
+				Width:  15,
+				Height: 4,
+			}),
+		}),
+	})
 
-	plcmp := NewPlaylistCmp(playlists)
-	dcmp := NewDisplayCmp()
-	srcmp := NewSearchCmp()
-
-	view := NewView(plcmp, dcmp, srcmp, playlistm)
+	view := NewView(menu, input)
 	player.OnPlay = func(track *Track) {
-		dcmp.Text = track.Name
 		view.Render()
 	}
 

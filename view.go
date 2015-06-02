@@ -92,14 +92,6 @@ func (v *View) Render() {
 	termui.Render(cmps...)
 }
 
-type Component interface {
-	Handle(termui.Event)
-	Child() Component
-	Focus(bool)
-	Targetable() bool
-	Visible() bool
-}
-
 func cmpRing(cmp Component) *ring.Ring {
 	if cmp == nil {
 		return nil
@@ -125,6 +117,10 @@ type VerticalList struct {
 }
 
 func (vl *VerticalList) Prev() {
+	if len(vl.items) == 0 {
+		return
+	}
+
 	toggle(&vl.items[vl.current], false)
 	if vl.current == 0 {
 		vl.current = len(vl.items) - 1
@@ -145,6 +141,10 @@ func (vl *VerticalList) Prev() {
 }
 
 func (vl *VerticalList) Next() {
+	if len(vl.items) == 0 {
+		return
+	}
+
 	toggle(&vl.items[vl.current], false)
 	if vl.current == len(vl.items)-1 {
 		vl.current = 0
@@ -407,7 +407,7 @@ func NewSearchResultCmp() *SearchResultCmp {
 		nil,
 	}
 	c.child = NewActionMenuCmp([]string{"download", "open"}, []ActionFunc{
-		func(index int) error {
+		func(v Component, index int) error {
 			name, err := download(c.results[c.current].Url)
 			if err != nil {
 				return err
@@ -415,7 +415,7 @@ func NewSearchResultCmp() *SearchResultCmp {
 			println(name)
 			return nil
 		},
-		func(index int) error {
+		func(v Component, index int) error {
 			return exec.Command("open", c.results[c.current].Url).Run()
 		},
 	})
@@ -449,8 +449,6 @@ func (c *SearchResultCmp) Handle(e termui.Event) {
 		c.child.visible = true
 	}
 }
-
-type ActionFunc func(int) error
 
 type ActionMenuCmp struct {
 	VerticalList
@@ -494,10 +492,5 @@ func (c *ActionMenuCmp) Handle(e termui.Event) {
 		c.Next()
 	}
 	if e.Type == termui.EventKey && e.Key == termui.KeyEnter {
-		err := c.actions[c.current](0)
-		if err != nil {
-			println(err)
-			return
-		}
 	}
 }
