@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os/exec"
 	"path/filepath"
@@ -37,10 +38,6 @@ func main() {
 	for i, p := range playlists {
 		plnames[i] = p.Name
 	}
-	trnames := make([]string, len(playlists[0].Tracks))
-	for i, t := range playlists[0].Tracks {
-		trnames[i] = t.Name
-	}
 
 	menu := NewMenu(MenuConf{
 		Labels:  plnames,
@@ -49,7 +46,7 @@ func main() {
 		Visible: true,
 		Data:    playlists,
 		Key: map[termui.Key]ActionFunc{
-			termui.KeyEnter: func(c Component, index int) error {
+			termui.KeyEnter: func(c Component, index int) {
 				self, child := c.(*Menu), c.Child().(*Menu)
 				p := self.Data.([]*Playlist)[index]
 
@@ -59,56 +56,50 @@ func main() {
 				}
 				child.Set(names)
 				child.Data = p.Tracks
-				return nil
 			},
 		},
 		Child: NewMenu(MenuConf{
-			Labels:  trnames,
 			X:       30,
 			Width:   35,
 			Height:  HEIGHT,
 			Visible: true,
-			Data:    playlists[0].Tracks,
 			Key: map[termui.Key]ActionFunc{
-				termui.KeyEnter: func(c Component, index int) error {
-					tracks := c.(*Menu).Data.([]*Track)
-					player.Init(tracks, index)
-					return nil
+				termui.KeyEnter: func(c Component, index int) {
+					if tracks, ok := c.(*Menu).Data.([]*Track); ok {
+						player.Init(tracks, index)
+					}
 				},
 			},
 			Ch: map[rune]ActionFunc{
-				'o': func(c Component, index int) error {
-					c.Child().(*Menu).visible = true
-					c.Child().(*Menu).Data = c.(*Menu).Data.([]*Track)[index]
-					return nil
+				'o': func(c Component, index int) {
+					if tracks, ok := c.(*Menu).Data.([]*Track); ok {
+						c.Child().(*Menu).Data = tracks[index]
+						c.Child().(*Menu).visible = true
+					}
 				},
 			},
 			Child: NewMenu(MenuConf{
-				Labels: []string{"move to", "delete"},
-				Y:      35,
-				X:      65,
-				Width:  15,
-				Height: 4,
+				Labels:   []string{"move to", "delete"},
+				X:        65,
+				Width:    15,
+				Height:   4,
+				Hideable: true,
 				Key: map[termui.Key]ActionFunc{
-					termui.KeyEnter: func(c Component, index int) error {
+					termui.KeyEnter: func(c Component, index int) {
 						switch index {
 						case 0:
 						case 1:
+							if err := c.(*Menu).Data.(*Track).Remove(); err != nil {
+								fmt.Println(err)
+							}
 						}
-						return nil
-					},
-				},
-				Ch: map[rune]ActionFunc{
-					'q': func(c Component, index int) error {
-						c.(*Menu).visible = false
-						return nil
 					},
 				},
 			}),
 		}),
 	})
 
-	input := NewInput(InputConf{
+	search := NewInput(InputConf{
 		Label:   "search",
 		Width:   40,
 		Height:  3,
@@ -129,25 +120,60 @@ func main() {
 		},
 		Child: NewMenu(MenuConf{
 			Y:       HEIGHT + 3,
-			Width:   30,
+			Width:   40,
 			Height:  HEIGHT,
 			Visible: true,
 			Key: map[termui.Key]ActionFunc{
-				termui.KeyEnter: func(c Component, index int) error {
-					c.Child().(*Menu).visible = true
-					c.(*Menu).Data = c.(*Menu).Data.([]Result)[index]
+				termui.KeyEnter: func(c Component, index int) {
+					if res, ok := c.(*Menu).Data.([]search.Result); ok {
+						c.Child().(*Menu).Data = res[index]
+						c.Child().(*Menu).visible = true
+					}
 				},
 			},
 			Child: NewMenu(MenuConf{
-				Y:      HEIGHT + 3,
-				X:      30,
-				Width:  15,
-				Height: 4,
+				Labels:   []string{"download", "open"},
+				Y:        HEIGHT + 3,
+				X:        40,
+				Width:    15,
+				Height:   4,
+				Hideable: true,
+				Key: map[termui.Key]ActionFunc{
+					termui.KeyEnter: func(c Component, index int) {
+						switch index {
+						case 0:
+							c.Child().(*Menu).Key[termui.KeyEnter] = func(child Component, index int) {
+								playlist := child.(*Menu).Data.([]*Playlist)[index]
+
+								track, err := download(
+									c.(*Menu).Data.(search.Result).Url,
+									playlist.Path)
+								if err != nil {
+									return
+								}
+								playlist.Tracks = append(playlist.Tracks, track)
+							}
+							c.Child().(*Menu).visible = true
+						case 1:
+							exec.Command("open", c.(*Menu).Data.(search.Result).Url).Run()
+						}
+					},
+				},
+				Child: NewMenu(MenuConf{
+					Labels:   plnames,
+					Y:        HEIGHT + 3,
+					X:        55,
+					Width:    30,
+					Hideable: true,
+					Height:   HEIGHT,
+					Data:     playlists,
+					Key:      map[termui.Key]ActionFunc{},
+				}),
 			}),
 		}),
 	})
 
-	view := NewView(menu, input)
+	view := NewView(menu, search)
 	player.OnPlay = func(track *Track) {
 		view.Render()
 	}
@@ -171,7 +197,10 @@ func walk(root string) (ret []*Playlist) {
 			continue
 		}
 
-		p := &Playlist{Name: fi.Name()}
+		p := &Playlist{
+			Name: fi.Name(),
+			Path: filepath.Join(root, fi.Name()),
+		}
 		childs, err := ioutil.ReadDir(filepath.Join(root, p.Name))
 		if err != nil {
 			panic(err)
@@ -183,6 +212,7 @@ func walk(root string) (ret []*Playlist) {
 			p.Tracks = append(p.Tracks, &Track{
 				Name: strings.TrimSuffix(c.Name(), filepath.Ext(c.Name())),
 				Path: filepath.Join(root, p.Name, c.Name()),
+				P:    p,
 			})
 		}
 		ret = append(ret, p)
@@ -190,16 +220,21 @@ func walk(root string) (ret []*Playlist) {
 	return
 }
 
-func download(url string) (string, error) {
+func download(url, dst string) (*Track, error) {
 	out, err := exec.Command("youtube-dl",
-		"-x", "--audio-format", "mp3", "-o", "music/%(title)s.%(ext)s",
+		"-x", "--audio-format", "mp3", "-o", dst+"/%(title)s.%(ext)s",
 		url).Output()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if b := reFilename.Find(out); len(b) > 2 {
-		return string(b)[2:], nil
+		path := string(b)[2:]
+		_, file := filepath.Split(path)
+		return &Track{
+			Name: file,
+			Path: path,
+		}, nil
 	}
-	return "", errors.New("check output for error")
+	return nil, errors.New("check output for error")
 }

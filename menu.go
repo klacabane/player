@@ -2,15 +2,7 @@ package main
 
 import "github.com/gizak/termui"
 
-type Component interface {
-	Handle(termui.Event)
-	Child() Component
-	Focus(bool)
-	Targetable() bool
-	Visible() bool
-}
-
-type ActionFunc func(Component, int) error
+type ActionFunc func(Component, int)
 
 type eventListener struct {
 	Key map[termui.Key]ActionFunc
@@ -18,16 +10,17 @@ type eventListener struct {
 }
 
 type MenuConf struct {
-	Labels  []string
-	Key     map[termui.Key]ActionFunc
-	Ch      map[rune]ActionFunc
-	Width   int
-	Height  int
-	X       int
-	Y       int
-	Visible bool
-	Data    interface{}
-	Child   Component
+	Labels   []string
+	Key      map[termui.Key]ActionFunc
+	Ch       map[rune]ActionFunc
+	Width    int
+	Height   int
+	X        int
+	Y        int
+	Visible  bool
+	Hideable bool
+	Data     interface{}
+	Child    Component
 }
 
 type Menu struct {
@@ -36,8 +29,9 @@ type Menu struct {
 
 	Data interface{}
 
-	visible bool
-	child   Component
+	hideable bool
+	visible  bool
+	child    Component
 }
 
 func NewMenu(conf MenuConf) *Menu {
@@ -47,9 +41,10 @@ func NewMenu(conf MenuConf) *Menu {
 			Key: conf.Key,
 			Ch:  conf.Ch,
 		},
-		Data:    conf.Data,
-		visible: conf.Visible,
-		child:   conf.Child,
+		Data:     conf.Data,
+		hideable: conf.Hideable,
+		visible:  conf.Visible,
+		child:    conf.Child,
 	}
 	m.Width = conf.Width
 	m.Height = conf.Height
@@ -87,4 +82,13 @@ func (c *Menu) Handle(e termui.Event) {
 	if fn, ok := c.Ch[e.Ch]; ok {
 		fn(c, c.current)
 	}
+}
+
+func (c *Menu) Destroy() {
+	c.Focus(false)
+	c.visible = false
+}
+
+func (c *Menu) Hideable() bool {
+	return c.hideable
 }
