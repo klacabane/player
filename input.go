@@ -8,7 +8,7 @@ type InputConf struct {
 	Height   int
 	X        int
 	Y        int
-	Visible  bool
+	Hide     bool
 	Child    Component
 	OnSubmit func(Component, string)
 }
@@ -16,23 +16,22 @@ type InputConf struct {
 type Input struct {
 	*termui.Par
 	OnSubmit func(Component, string)
-
-	visible bool
-	child   Component
+	Child    Component
+	Hide     bool
 }
 
 func NewInput(conf InputConf) *Input {
 	input := &Input{
-		Par: termui.NewPar(""),
+		Par:      termui.NewPar(""),
+		OnSubmit: conf.OnSubmit,
+		Child:    conf.Child,
+		Hide:     conf.Hide,
 	}
 	input.Border.Label = conf.Label
 	input.Width = conf.Width
 	input.Height = conf.Height
 	input.X = conf.X
 	input.Y = conf.Y
-	input.child = conf.Child
-	input.visible = conf.Visible
-	input.OnSubmit = conf.OnSubmit
 	return input
 }
 
@@ -60,8 +59,8 @@ func (c *Input) Handle(e termui.Event) {
 	c.Text += string(e.Ch)
 }
 
-func (c *Input) Targetable() bool { return c.visible }
+func (c *Input) Targetable() bool { return !c.Hide }
 
-func (c *Input) Visible() bool { return c.visible }
+func (c *Input) Visible() bool { return !c.Hide }
 
-func (c *Input) Child() Component { return c.child }
+func (c *Input) ChildCmp() Component { return c.Child }

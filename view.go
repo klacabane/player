@@ -14,7 +14,7 @@ const (
 
 type Component interface {
 	Handle(termui.Event)
-	Child() Component
+	ChildCmp() Component
 	Focus(bool)
 	Targetable() bool
 	Visible() bool
@@ -63,7 +63,7 @@ func (v *View) Prev() {
 	v.component.Value.(Component).Focus(true)
 }
 
-func (v *View) NextComponent() {
+func (v *View) Next() {
 	if v.component == v.component.Prev() {
 		return
 	}
@@ -96,7 +96,7 @@ func (v *View) Run() {
 				v.Current().Handle(e)
 			}
 		} else if e.Type == termui.EventKey && e.Key == termui.KeyTab {
-			v.NextComponent()
+			v.Next()
 		} else {
 			v.Current().Handle(e)
 		}
@@ -122,8 +122,8 @@ func cmpRing(cmp Component) *ring.Ring {
 
 	r := new(ring.Ring)
 	r.Value = cmp
-	if cmp.Child() != nil {
-		r.Link(cmpRing(cmp.Child()))
+	if cmp.ChildCmp() != nil {
+		r.Link(cmpRing(cmp.ChildCmp()))
 	}
 	return r
 }

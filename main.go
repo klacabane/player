@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -18,11 +19,18 @@ var (
 	data_dir string
 )
 
-var reFilename *regexp.Regexp
+var reFilename = regexp.MustCompile(":(.*).mp3")
+
+var viewModel struct {
+	Playlists []*Playlist
+	Playlist  *Playlist
+	Track     *Track
+
+	Results []search.Result
+	Result  search.Result
+}
 
 func main() {
-	reFilename = regexp.MustCompile(":(.*).mp3")
-
 	if err := termui.Init(); err != nil {
 		panic(err)
 	}
@@ -33,147 +41,254 @@ func main() {
 
 	data_dir = "/Users/wopa/Dropbox/player/data/"
 
-	playlists := walk(data_dir)
-	plnames := make([]string, len(playlists))
-	for i, p := range playlists {
-		plnames[i] = p.Name
+	viewModel.Playlists = walk(data_dir)
+	names := make([]string, len(viewModel.Playlists))
+	for i, p := range viewModel.Playlists {
+		names[i] = p.Name
 	}
 
-	menu := NewMenu(MenuConf{
-		Labels:  plnames,
-		Width:   30,
-		Height:  HEIGHT,
-		Visible: true,
-		Data:    playlists,
+	menuY := 3
+
+	tracks_m := NewMenu(MenuConf{
+		X:      30,
+		Y:      menuY,
+		Width:  35,
+		Height: HEIGHT,
 		Key: map[termui.Key]ActionFunc{
 			termui.KeyEnter: func(c Component, index int) {
-				self, child := c.(*Menu), c.Child().(*Menu)
-				p := self.Data.([]*Playlist)[index]
+				if viewModel.Playlist == nil {
+					return
+				}
+				player.Init(viewModel.Playlist.Tracks, index)
+			},
+		},
+		Ch: map[rune]ActionFunc{
+			'o': func(c Component, index int) {
+				if viewModel.Playlist == nil {
+					return
+				}
+				viewModel.Track = viewModel.Playlist.Tracks[index]
 
-				names := make([]string, len(p.Tracks))
-				for i, t := range p.Tracks {
+				c.ChildCmp().(*Menu).Hide = false
+			},
+		},
+	})
+
+	tracks_opts_m := NewMenu(MenuConf{
+		Labels:   []string{"rename", "move to", "delete"},
+		X:        65,
+		Y:        menuY,
+		Width:    15,
+		Height:   5,
+		Hideable: true,
+		Hide:     true,
+		Key: map[termui.Key]ActionFunc{
+			termui.KeyEnter: func(c Component, index int) {
+				if viewModel.Track == nil {
+					return
+				}
+
+				var trackpos int
+				updateLabels := func() {
+					var names []string
+					for i, t := range viewModel.Playlist.Tracks {
+						if t == viewModel.Track {
+							trackpos = i
+							continue
+						}
+						names = append(names, t.Name)
+					}
+					tracks_m.Set(names)
+				}
+
+				switch index {
+				case 1:
+					names := make([]string, len(viewModel.Playlists))
+					for i, p := range viewModel.Playlists {
+						names[i] = p.Name
+					}
+					c.ChildCmp().(*Menu).Set(names)
+					c.ChildCmp().(*Menu).Hide = false
+					c.ChildCmp().(*Menu).Key[termui.KeyEnter] = func(child Component, playlistIndex int) {
+						if viewModel.Track == nil {
+							return
+						}
+
+						pdst := viewModel.Playlists[playlistIndex]
+						newpath := filepath.Join(pdst.Path, viewModel.Track.Name)
+						if newpath == viewModel.Track.Path {
+							return
+						}
+
+						if err := os.Rename(viewModel.Track.Path, newpath); err != nil {
+							fmt.Println(err)
+							return
+						}
+						viewModel.Track.Path = newpath
+						pdst.Tracks = append(pdst.Tracks, viewModel.Track)
+
+						updateLabels()
+						if len(viewModel.Playlist.Tracks) <= 1 {
+							viewModel.Playlist.Tracks = []*Track{}
+						} else {
+							viewModel.Playlist.Tracks = append(viewModel.Playlist.Tracks[:trackpos], viewModel.Playlist.Tracks[trackpos+1:]...)
+						}
+
+						viewModel.Track = nil
+					}
+				case 2:
+					if err := os.Remove(viewModel.Track.Path); err != nil {
+						fmt.Println(err)
+						return
+					}
+					updateLabels()
+
+					viewModel.Playlist.Tracks = append(viewModel.Playlist.Tracks[:trackpos], viewModel.Playlist.Tracks[:trackpos+1]...)
+					viewModel.Track = nil
+				}
+			},
+		},
+		Child: NewMenu(MenuConf{
+			Height:   HEIGHT,
+			X:        80,
+			Y:        menuY,
+			Width:    20,
+			Hideable: true,
+			Hide:     true,
+			Key:      map[termui.Key]ActionFunc{},
+		}),
+	})
+
+	tracks_m.Child = tracks_opts_m
+
+	playlist_m := NewMenu(MenuConf{
+		Labels: names,
+		Width:  30,
+		Height: HEIGHT,
+		Y:      menuY,
+		Key: map[termui.Key]ActionFunc{
+			termui.KeyEnter: func(c Component, index int) {
+				viewModel.Playlist = viewModel.Playlists[index]
+
+				names := make([]string, len(viewModel.Playlist.Tracks))
+				for i, t := range viewModel.Playlist.Tracks {
 					names[i] = t.Name
 				}
-				child.Set(names)
-				child.Data = p.Tracks
+				tracks_m.Set(names)
 			},
 		},
-		Child: NewMenu(MenuConf{
-			X:       30,
-			Width:   35,
-			Height:  HEIGHT,
-			Visible: true,
-			Key: map[termui.Key]ActionFunc{
-				termui.KeyEnter: func(c Component, index int) {
-					if tracks, ok := c.(*Menu).Data.([]*Track); ok {
-						player.Init(tracks, index)
-					}
-				},
-			},
-			Ch: map[rune]ActionFunc{
-				'o': func(c Component, index int) {
-					if tracks, ok := c.(*Menu).Data.([]*Track); ok {
-						c.Child().(*Menu).Data = tracks[index]
-						c.Child().(*Menu).visible = true
-					}
-				},
-			},
-			Child: NewMenu(MenuConf{
-				Labels:   []string{"move to", "delete"},
-				X:        65,
-				Width:    15,
-				Height:   4,
-				Hideable: true,
-				Key: map[termui.Key]ActionFunc{
-					termui.KeyEnter: func(c Component, index int) {
-						switch index {
-						case 0:
-						case 1:
-							if err := c.(*Menu).Data.(*Track).Remove(); err != nil {
-								fmt.Println(err)
-							}
-						}
-					},
-				},
-			}),
-		}),
 	})
 
-	search := NewInput(InputConf{
-		Label:   "search",
-		Width:   40,
-		Height:  3,
-		Y:       HEIGHT,
-		Visible: true,
+	add_playlist_input := NewInput(InputConf{
+		Label:  "new",
+		Width:  30,
+		Height: 3,
 		OnSubmit: func(c Component, val string) {
-			res, err := search.Do(val, 20)
+			playlist := &Playlist{
+				Name: val,
+				Path: filepath.Join(data_dir, val),
+			}
+
+			err := os.Mkdir(playlist.Path, os.ModePerm)
 			if err != nil {
+				fmt.Println(err)
 				return
 			}
+			viewModel.Playlists = append(viewModel.Playlists, playlist)
 
-			titles := make([]string, len(res))
-			for i, r := range res {
-				titles[i] = r.Title
+			names := make([]string, len(viewModel.Playlists))
+			for i, pl := range viewModel.Playlists {
+				names[i] = pl.Name
 			}
-			c.Child().(*Menu).Set(titles)
-			c.Child().(*Menu).Data = res
+			playlist_m.Set(names)
+		},
+	})
+
+	results_m := NewMenu(MenuConf{
+		Y:      HEIGHT + 3 + menuY,
+		Width:  40,
+		Height: HEIGHT,
+		Key: map[termui.Key]ActionFunc{
+			termui.KeyEnter: func(c Component, index int) {
+				if len(viewModel.Results) > index {
+					viewModel.Result = viewModel.Results[index]
+
+					c.ChildCmp().(*Menu).Hide = false
+				}
+			},
 		},
 		Child: NewMenu(MenuConf{
-			Y:       HEIGHT + 3,
-			Width:   40,
-			Height:  HEIGHT,
-			Visible: true,
+			Labels:   []string{"download", "open"},
+			Y:        HEIGHT + 3,
+			X:        40,
+			Width:    15,
+			Height:   4,
+			Hideable: true,
+			Hide:     true,
 			Key: map[termui.Key]ActionFunc{
 				termui.KeyEnter: func(c Component, index int) {
-					if res, ok := c.(*Menu).Data.([]search.Result); ok {
-						c.Child().(*Menu).Data = res[index]
-						c.Child().(*Menu).visible = true
+					switch index {
+					case 0:
+						names := make([]string, len(viewModel.Playlists))
+						for i, p := range viewModel.Playlists {
+							names[i] = p.Name
+						}
+						c.ChildCmp().(*Menu).Set(names)
+						c.ChildCmp().(*Menu).Hide = false
+					case 1:
+						exec.Command("open", viewModel.Result.Url).Run()
 					}
 				},
 			},
 			Child: NewMenu(MenuConf{
-				Labels:   []string{"download", "open"},
 				Y:        HEIGHT + 3,
-				X:        40,
-				Width:    15,
-				Height:   4,
+				X:        55,
+				Width:    30,
 				Hideable: true,
+				Hide:     true,
+				Height:   HEIGHT,
 				Key: map[termui.Key]ActionFunc{
 					termui.KeyEnter: func(c Component, index int) {
-						switch index {
-						case 0:
-							c.Child().(*Menu).Key[termui.KeyEnter] = func(child Component, index int) {
-								playlist := child.(*Menu).Data.([]*Playlist)[index]
+						playlist := viewModel.Playlists[index]
 
-								track, err := download(
-									c.(*Menu).Data.(search.Result).Url,
-									playlist.Path)
-								if err != nil {
-									return
-								}
-								playlist.Tracks = append(playlist.Tracks, track)
+						go func() {
+							track, err := download(
+								viewModel.Result.Url,
+								playlist.Path)
+							if err != nil {
+								return
 							}
-							c.Child().(*Menu).visible = true
-						case 1:
-							exec.Command("open", c.(*Menu).Data.(search.Result).Url).Run()
-						}
+							playlist.Tracks = append(playlist.Tracks, track)
+						}()
 					},
 				},
-				Child: NewMenu(MenuConf{
-					Labels:   plnames,
-					Y:        HEIGHT + 3,
-					X:        55,
-					Width:    30,
-					Hideable: true,
-					Height:   HEIGHT,
-					Data:     playlists,
-					Key:      map[termui.Key]ActionFunc{},
-				}),
 			}),
 		}),
 	})
 
-	view := NewView(menu, search)
+	search_input := NewInput(InputConf{
+		Label:  "search",
+		Width:  40,
+		Height: 3,
+		Y:      HEIGHT + menuY,
+		OnSubmit: func(c Component, val string) {
+			go func() {
+				res, err := search.Do(val, 20)
+				if err != nil {
+					return
+				}
+				viewModel.Results = res
+
+				titles := make([]string, len(viewModel.Results))
+				for i, r := range viewModel.Results {
+					titles[i] = r.Title
+				}
+				results_m.Set(titles)
+			}()
+		},
+	})
+
+	view := NewView(playlist_m, tracks_m, search_input, results_m, add_playlist_input)
 	player.OnPlay = func(track *Track) {
 		view.Render()
 	}
@@ -212,7 +327,6 @@ func walk(root string) (ret []*Playlist) {
 			p.Tracks = append(p.Tracks, &Track{
 				Name: strings.TrimSuffix(c.Name(), filepath.Ext(c.Name())),
 				Path: filepath.Join(root, p.Name, c.Name()),
-				P:    p,
 			})
 		}
 		ret = append(ret, p)

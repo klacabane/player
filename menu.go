@@ -17,9 +17,8 @@ type MenuConf struct {
 	Height   int
 	X        int
 	Y        int
-	Visible  bool
+	Hide     bool
 	Hideable bool
-	Data     interface{}
 	Child    Component
 }
 
@@ -27,11 +26,10 @@ type Menu struct {
 	VerticalList
 	eventListener
 
-	Data interface{}
+	Child Component
+	Hide  bool
 
 	hideable bool
-	visible  bool
-	child    Component
 }
 
 func NewMenu(conf MenuConf) *Menu {
@@ -41,10 +39,9 @@ func NewMenu(conf MenuConf) *Menu {
 			Key: conf.Key,
 			Ch:  conf.Ch,
 		},
-		Data:     conf.Data,
+		Child:    conf.Child,
+		Hide:     conf.Hide,
 		hideable: conf.Hideable,
-		visible:  conf.Visible,
-		child:    conf.Child,
 	}
 	m.Width = conf.Width
 	m.Height = conf.Height
@@ -55,11 +52,11 @@ func NewMenu(conf MenuConf) *Menu {
 	return m
 }
 
-func (c *Menu) Targetable() bool { return c.visible }
+func (c *Menu) Targetable() bool { return !c.Hide }
 
-func (c *Menu) Visible() bool { return c.visible }
+func (c *Menu) Visible() bool { return !c.Hide }
 
-func (c *Menu) Child() Component { return c.child }
+func (c *Menu) ChildCmp() Component { return c.Child }
 
 func (c *Menu) Focus(focus bool) {
 	if focus {
@@ -86,7 +83,7 @@ func (c *Menu) Handle(e termui.Event) {
 
 func (c *Menu) Destroy() {
 	c.Focus(false)
-	c.visible = false
+	c.Hide = true
 }
 
 func (c *Menu) Hideable() bool {

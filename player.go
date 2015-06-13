@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os"
 	"os/exec"
 	"syscall"
 )
@@ -15,24 +14,6 @@ type Playlist struct {
 type Track struct {
 	Name string
 	Path string
-	P    *Playlist
-}
-
-func (t *Track) Remove() error {
-	err := os.Remove(t.Path)
-	if err != nil {
-		return err
-	}
-
-	var i int
-	for ; i < len(t.P.Tracks); i++ {
-		if t.P.Tracks[i] == t {
-			break
-		}
-	}
-	t.P.Tracks = append(t.P.Tracks[:i], t.P.Tracks[i+1:]...)
-
-	return nil
 }
 
 type AudioPlayer struct {
