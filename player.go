@@ -13,6 +13,7 @@ type Playlist struct {
 
 type Track struct {
 	Name string
+	Ext  string
 	Path string
 }
 
