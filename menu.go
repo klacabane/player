@@ -12,18 +12,18 @@ const (
 	HEIGHT       = VISIBLE_ROWS + 2
 )
 
-type ActionFunc func(view.Component, int)
+type MenuFn func(int)
 
 type eventListener struct {
-	Key map[termui.Key]ActionFunc
-	Ch  map[rune]ActionFunc
+	Key map[termui.Key]MenuFn
+	Ch  map[rune]MenuFn
 }
 
 type MenuConf struct {
 	Title    string
 	Labels   []string
-	Key      map[termui.Key]ActionFunc
-	Ch       map[rune]ActionFunc
+	Key      map[termui.Key]MenuFn
+	Ch       map[rune]MenuFn
 	Width    int
 	Height   int
 	X        int
@@ -86,10 +86,10 @@ func (c *Menu) Handle(e termui.Event) {
 		c.Next()
 	}
 	if fn, ok := c.Key[e.Key]; ok {
-		fn(c, c.current)
+		fn(c.current)
 	}
 	if fn, ok := c.Ch[e.Ch]; ok {
-		fn(c, c.current)
+		fn(c.current)
 	}
 }
 

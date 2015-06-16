@@ -21,53 +21,59 @@ type Disposable interface {
 	Destroy()
 }
 
-var eventCh = termui.EventCh()
+type View struct {
+	Components []interface{}
 
-var rcomponent *ring.Ring
+	eventCh    <-chan termui.Event
+	rcomponent *ring.Ring
+}
 
-var head *ring.Ring
-
-var Components []interface{}
-
-func Init(start int) {
-	if rcomponent == nil {
-		rcomponent = new(ring.Ring)
-	} else {
-		rcomponent.Unlink(rcomponent.Len())
+func New(start int, cmps []interface{}) *View {
+	v := &View{
+		Components: cmps,
+		eventCh:    termui.EventCh(),
+		rcomponent: new(ring.Ring),
 	}
+	v.Init(start)
 
-	for i, v := range Components {
-		if cmp, ok := v.(Component); ok {
+	return v
+}
+
+func (v *View) Init(start int) {
+	v.rcomponent.Unlink(v.rcomponent.Len())
+
+	for i, elem := range v.Components {
+		if cmp, ok := elem.(Component); ok {
 			r := cmpRing(cmp)
 			if i == 0 {
-				rcomponent = r
+				v.rcomponent = r
 			} else {
-				rcomponent = rcomponent.Move(rcomponent.Len() - 1)
-				rcomponent = rcomponent.Link(r)
+				v.rcomponent = v.rcomponent.Move(v.rcomponent.Len() - 1)
+				v.rcomponent = v.rcomponent.Link(r)
 			}
 		} else {
 			r := ring.New(1)
-			r.Value = v
-			rcomponent = rcomponent.Move(rcomponent.Len() - 1)
-			rcomponent = rcomponent.Link(r)
+			r.Value = elem
+			v.rcomponent = v.rcomponent.Move(v.rcomponent.Len() - 1)
+			v.rcomponent = v.rcomponent.Link(r)
 		}
 	}
-	rcomponent = rcomponent.Move(start)
-	Current().Focus(true)
+	v.rcomponent = v.rcomponent.Move(start)
+	v.Current().Focus(true)
 }
 
-func Move(n int) {
-	Current().Focus(false)
+func (v *View) Move(n int) {
+	v.Current().Focus(false)
 	for n > 0 {
-		Next()
+		v.Next()
 		n--
 	}
-	Current().Focus(true)
+	v.Current().Focus(true)
 }
 
-func Hide() {
-	Current().(Disposable).Destroy()
-	Prev()
+func (v *View) Hide() {
+	v.Current().(Disposable).Destroy()
+	v.Prev()
 }
 
 func cmpRing(cmp Component) *ring.Ring {
@@ -84,78 +90,82 @@ func cmpRing(cmp Component) *ring.Ring {
 	return r
 }
 
-func Current() Component {
-	return rcomponent.Value.(Component)
+func (v *View) Current() Component {
+	return v.rcomponent.Value.(Component)
 }
 
-func Prev() {
-	if rcomponent == rcomponent.Prev() {
-		return
+func (v *View) Prev() *View {
+	if v.rcomponent == v.rcomponent.Prev() {
+		return v
 	}
 
-	Current().Focus(false)
+	v.Current().Focus(false)
 	for {
-		rcomponent = rcomponent.Prev()
-		if cmp, ok := rcomponent.Value.(Component); ok && cmp.Targetable() {
+		v.rcomponent = v.rcomponent.Prev()
+		if cmp, ok := v.rcomponent.Value.(Component); ok && cmp.Targetable() {
 			break
 		}
 	}
-	Current().Focus(true)
+	v.Current().Focus(true)
+
+	return v
 }
 
-func PrevComponent() Component {
-	return rcomponent.Prev().Value.(Component)
+func (v *View) PrevComponent() Component {
+	return v.rcomponent.Prev().Value.(Component)
 }
 
-func NextComponent() Component {
-	return rcomponent.Next().Value.(Component)
+func (v *View) NextComponent() Component {
+	return v.rcomponent.Next().Value.(Component)
 }
 
-func Next() {
-	if rcomponent == rcomponent.Next() {
-		return
+func (v *View) Next() *View {
+	if v.rcomponent == v.rcomponent.Next() {
+		return v
 	}
 
-	Current().Focus(false)
+	v.Current().Focus(false)
 	for {
-		rcomponent = rcomponent.Next()
-		if cmp, ok := rcomponent.Value.(Component); ok && cmp.Targetable() {
+		v.rcomponent = v.rcomponent.Next()
+		if cmp, ok := v.rcomponent.Value.(Component); ok && cmp.Targetable() {
 			break
 		}
 	}
-	Current().Focus(true)
+	v.Current().Focus(true)
+
+	return v
 }
 
-func Run() {
-	Render()
+func (v *View) Run() {
+	v.Render()
 	for {
-		e := <-eventCh
+		e := <-v.eventCh
 		if e.Type == termui.EventKey && e.Key == termui.KeyEsc {
 			return
 		}
 
 		if e.Type == termui.EventKey && e.Ch == 'q' {
-			d, ok := Current().(Disposable)
+			d, ok := v.Current().(Disposable)
 			if ok {
 				if d.Hideable() {
 					d.Destroy()
-					Prev()
+					v.Prev()
 				}
 			} else {
-				Current().Handle(e)
+				v.Current().Handle(e)
 			}
 		} else if e.Type == termui.EventKey && e.Key == termui.KeyTab {
-			Next()
+			v.Next()
 		} else {
-			Current().Handle(e)
+			v.Current().Handle(e)
 		}
-		Render()
+		v.Render()
 	}
 }
 
-func Render() {
+func (v *View) Render() {
 	cmps := make([]termui.Bufferer, 0)
-	rcomponent.Do(func(x interface{}) {
+	v.rcomponent.Do(func(x interface{}) {
 		cmp, ok := x.(Component)
 		if !ok || cmp.Visible() {
 			cmps = append(cmps, x.(termui.Bufferer))

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/gizak/termui"
 	"github.com/klacabane/player/search"
@@ -68,6 +67,8 @@ func main() {
 
 	menuY := 3
 
+	var v *view.View
+
 	tracks_opts_m := NewMenu(MenuConf{
 		Labels:   []string{"rename", "move to", "delete"},
 		X:        65,
@@ -76,8 +77,8 @@ func main() {
 		Height:   5,
 		Hideable: true,
 		Hide:     true,
-		Key: map[termui.Key]ActionFunc{
-			termui.KeyEnter: func(c view.Component, index int) {
+		Key: map[termui.Key]MenuFn{
+			termui.KeyEnter: func(index int) {
 				if viewModel.Track == nil {
 					return
 				}
@@ -99,7 +100,7 @@ func main() {
 
 				switch index {
 				case 0:
-					view.Current().(*Menu).Child = NewInput(InputConf{
+					v.Current().(*Menu).Child = NewInput(InputConf{
 						Height:   3,
 						Width:    20,
 						X:        80,
@@ -116,23 +117,23 @@ func main() {
 							viewModel.Track.Name = value
 							viewModel.Track.Path = newpath
 
-							view.Hide()
-							view.Hide()
-							view.Current().(*Menu).Set(trackLabels())
+							v.Hide()
+							v.Hide()
+							v.Current().(*Menu).Set(trackLabels())
 						},
 					})
 
-					view.Init(5)
+					v.Init(5)
 				case 1:
-					c.(*Menu).Child = NewMenu(MenuConf{
+					v.Current().(*Menu).Child = NewMenu(MenuConf{
 						Labels:   playlistLabels(),
 						Height:   HEIGHT,
 						X:        80,
 						Y:        menuY,
 						Width:    20,
 						Hideable: true,
-						Key: map[termui.Key]ActionFunc{
-							termui.KeyEnter: func(child view.Component, playlistIndex int) {
+						Key: map[termui.Key]MenuFn{
+							termui.KeyEnter: func(playlistIndex int) {
 								if viewModel.Track == nil {
 									return
 								}
@@ -152,14 +153,14 @@ func main() {
 
 								removeTrack()
 
-								view.Hide()
-								view.Hide()
-								view.Current().(*Menu).Set(trackLabels())
+								v.Hide()
+								v.Hide()
+								v.Current().(*Menu).Set(trackLabels())
 							},
 						},
 					})
 
-					view.Init(5)
+					v.Init(5)
 				case 2:
 					if err := os.Remove(viewModel.Track.Path); err != nil {
 						fmt.Println(err)
@@ -167,8 +168,8 @@ func main() {
 					}
 					removeTrack()
 
-					view.Hide()
-					view.Current().(*Menu).Set(trackLabels())
+					v.Hide()
+					v.Current().(*Menu).Set(trackLabels())
 				}
 			},
 		},
@@ -180,23 +181,23 @@ func main() {
 		Y:      menuY,
 		Width:  35,
 		Height: HEIGHT,
-		Key: map[termui.Key]ActionFunc{
-			termui.KeyEnter: func(c view.Component, index int) {
+		Key: map[termui.Key]MenuFn{
+			termui.KeyEnter: func(index int) {
 				if viewModel.Playlist == nil {
 					return
 				}
 				Player.Init(viewModel.Playlist.Tracks, index)
 			},
 		},
-		Ch: map[rune]ActionFunc{
-			'o': func(c view.Component, index int) {
+		Ch: map[rune]MenuFn{
+			'o': func(index int) {
 				if viewModel.Playlist == nil {
 					return
 				}
 				viewModel.Track = viewModel.Playlist.Tracks[index]
 
-				view.NextComponent().Show()
-				view.Next()
+				v.NextComponent().Show()
+				v.Next()
 			},
 		},
 		Child: tracks_opts_m,
@@ -219,8 +220,7 @@ func main() {
 			}
 			viewModel.Playlists = append(viewModel.Playlists, playlist)
 
-			view.Next()
-			view.Current().(*Menu).Set(playlistLabels())
+			v.Next().Current().(*Menu).Set(playlistLabels())
 		},
 	})
 
@@ -230,11 +230,11 @@ func main() {
 		Width:  30,
 		Height: HEIGHT,
 		Y:      menuY,
-		Key: map[termui.Key]ActionFunc{
-			termui.KeyEnter: func(c view.Component, index int) {
+		Key: map[termui.Key]MenuFn{
+			termui.KeyEnter: func(index int) {
 				viewModel.Playlist = viewModel.Playlists[index]
 
-				view.NextComponent().(*Menu).Set(trackLabels())
+				v.NextComponent().(*Menu).Set(trackLabels())
 			},
 		},
 	})
@@ -243,20 +243,29 @@ func main() {
 	download_list.Y = HEIGHT + 20
 	download_list.Height = HEIGHT
 	download_list.Width = 30
-	download_list.Border.Label = "downloads"
 	download_list.HasBorder = false
+
+	d := &Downloads{
+		addc:    make(chan string, 1),
+		removec: make(chan string, 1),
+	}
+
+	d.Tick = func(items []string) {
+		download_list.Items = items
+		v.Render()
+	}
 
 	results_m := NewMenu(MenuConf{
 		Y:      HEIGHT + 3 + menuY,
 		Width:  40,
 		Height: HEIGHT,
-		Key: map[termui.Key]ActionFunc{
-			termui.KeyEnter: func(c view.Component, index int) {
+		Key: map[termui.Key]MenuFn{
+			termui.KeyEnter: func(index int) {
 				if len(viewModel.Results) > index {
 					viewModel.Result = viewModel.Results[index]
 
-					view.NextComponent().Show()
-					view.Next()
+					v.NextComponent().Show()
+					v.Next()
 				}
 			},
 		},
@@ -268,13 +277,12 @@ func main() {
 			Height:   4,
 			Hideable: true,
 			Hide:     true,
-			Key: map[termui.Key]ActionFunc{
-				termui.KeyEnter: func(c view.Component, index int) {
+			Key: map[termui.Key]MenuFn{
+				termui.KeyEnter: func(index int) {
 					switch index {
 					case 0:
-						view.NextComponent().(*Menu).Set(playlistLabels())
-						view.NextComponent().Show()
-						view.Next()
+						v.NextComponent().Show()
+						v.Next().Current().(*Menu).Set(playlistLabels())
 					case 1:
 						exec.Command("open", viewModel.Result.Url).Run()
 					}
@@ -287,11 +295,12 @@ func main() {
 				Hideable: true,
 				Hide:     true,
 				Height:   HEIGHT,
-				Key: map[termui.Key]ActionFunc{
-					termui.KeyEnter: func(c view.Component, index int) {
+				Key: map[termui.Key]MenuFn{
+					termui.KeyEnter: func(index int) {
 						playlist := viewModel.Playlists[index]
-						download_list.Items = append(download_list.Items, " | "+viewModel.Result.Title)
+						title := viewModel.Result.Title
 
+						d.Add(title)
 						go func() {
 							errc := make(chan error, 1)
 							trackc := make(chan *Track, 1)
@@ -311,34 +320,17 @@ func main() {
 								select {
 								case track := <-trackc:
 									playlist.Tracks = append(playlist.Tracks, track)
-									download_list.Items = []string{}
 									break out
 								case err := <-errc:
 									fmt.Println(err)
-									download_list.Items = []string{}
 									break out
-								case <-time.After(1 * time.Second):
-									var state rune
-									switch download_list.Items[0][1] {
-									case '|':
-										state = '/'
-									case '/':
-										state = '-'
-									case '-':
-										state = '\\'
-									case '\\':
-										state = '|'
-									}
-									download_list.Items[0] = fmt.Sprintf(" %s %s", string(state), download_list.Items[0][3:])
-
-									view.Render()
 								}
 							}
-							view.Render()
+							d.Remove(title)
 						}()
 
-						view.Hide()
-						view.Hide()
+						v.Hide()
+						v.Hide()
 					},
 				},
 			}),
@@ -351,6 +343,7 @@ func main() {
 		Height: 3,
 		Y:      HEIGHT + menuY,
 		OnSubmit: func(value string) {
+			next := v.NextComponent()
 			go func() {
 				res, err := search.Do(value, 20)
 				if err != nil {
@@ -358,10 +351,8 @@ func main() {
 				}
 				viewModel.Results = res
 
-				view.Next()
-				view.Current().(*Menu).Set(resultLabels())
-
-				view.Render()
+				next.(*Menu).Set(resultLabels())
+				v.Render()
 			}()
 		},
 	})
@@ -374,7 +365,7 @@ func main() {
 		X:           30,
 	})
 
-	view.Components = []interface{}{
+	v = view.New(2, []interface{}{
 		add_playlist_input,
 		current_track_input,
 		playlist_m,
@@ -382,15 +373,14 @@ func main() {
 		search_input,
 		results_m,
 		download_list,
-	}
-	view.Init(2)
+	})
 
 	Player.OnPlay = func(track *Track) {
 		current_track_input.Text = track.Name
-		view.Render()
+		v.Render()
 	}
 
-	view.Run()
+	v.Run()
 }
 
 // walk reads the library folder and returns
@@ -413,6 +403,7 @@ func walk(root string) (ret []*Playlist) {
 			Name: fi.Name(),
 			Path: filepath.Join(root, fi.Name()),
 		}
+
 		childs, err := ioutil.ReadDir(filepath.Join(root, p.Name))
 		if err != nil {
 			panic(err)
