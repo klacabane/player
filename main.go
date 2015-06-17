@@ -8,11 +8,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gizak/termui"
 	"github.com/klacabane/player/search"
-	"github.com/klacabane/player/view"
+	v "github.com/klacabane/player/view"
 )
 
 var (
@@ -70,10 +71,10 @@ func main() {
 
 	menuY := 3
 
-	var v *view.View
+	var view *v.View
 
 	tracks_opts_m := NewMenu(MenuConf{
-		Labels:   []string{"rename", "move to", "delete"},
+		Labels:   []string{"rename", "to playlist", "move", "delete"},
 		X:        65,
 		Y:        menuY,
 		Width:    15,
@@ -103,7 +104,7 @@ func main() {
 
 				switch index {
 				case 0:
-					v.Current().(*Menu).Child = NewInput(InputConf{
+					view.Current().(*Menu).Child = NewInput(InputConf{
 						Height:   3,
 						Width:    20,
 						X:        80,
@@ -112,7 +113,7 @@ func main() {
 						OnSubmit: func(value string) {
 							newpath := filepath.Join(
 								filepath.Dir(viewModel.Track.Path),
-								value+viewModel.Track.Ext)
+								fmt.Sprintf("%02d ", viewModel.Track.Pos)+value+viewModel.Track.Ext)
 							if err := os.Rename(viewModel.Track.Path, newpath); err != nil {
 								fmt.Println(err)
 								return
@@ -120,15 +121,15 @@ func main() {
 							viewModel.Track.Name = value
 							viewModel.Track.Path = newpath
 
-							v.Hide()
-							v.Hide()
-							v.Current().(*Menu).Set(trackLabels())
+							view.Hide()
+							view.Hide()
+							view.Current().(*Menu).Set(trackLabels())
 						},
 					})
 
-					v.Init(5)
+					view.Init(5)
 				case 1:
-					v.Current().(*Menu).Child = NewMenu(MenuConf{
+					view.Current().(*Menu).Child = NewMenu(MenuConf{
 						Labels:   playlistLabels(),
 						Height:   HEIGHT,
 						X:        80,
@@ -142,7 +143,9 @@ func main() {
 								}
 
 								pdst := viewModel.Playlists[playlistIndex]
-								newpath := filepath.Join(pdst.Path, viewModel.Track.Name+viewModel.Track.Ext)
+								newpath := filepath.Join(pdst.Path,
+									fmt.Sprintf("%02d ", viewModel.Track.Pos)+
+										viewModel.Track.Name+viewModel.Track.Ext)
 								if newpath == viewModel.Track.Path {
 									return
 								}
@@ -156,14 +159,19 @@ func main() {
 
 								removeTrack()
 
-								v.Hide()
-								v.Hide()
-								v.Current().(*Menu).Set(trackLabels())
+								view.Hide()
+								view.Hide()
+								view.Current().(*Menu).Set(trackLabels())
 							},
 						},
 					})
 
-					v.Init(5)
+					view.Init(5)
+				case 3:
+					// TODO: update position
+					// dropdown type
+					// OnSubmit val ->
+					// insert track at pos and move down [pos:]
 				case 2:
 					if err := os.Remove(viewModel.Track.Path); err != nil {
 						fmt.Println(err)
@@ -171,8 +179,8 @@ func main() {
 					}
 					removeTrack()
 
-					v.Hide()
-					v.Current().(*Menu).Set(trackLabels())
+					view.Hide()
+					view.Current().(*Menu).Set(trackLabels())
 				}
 			},
 		},
@@ -199,8 +207,8 @@ func main() {
 				}
 				viewModel.Track = viewModel.Playlist.Tracks[index]
 
-				v.NextComponent().Show()
-				v.Next()
+				view.NextComponent().Show()
+				view.Next()
 			},
 		},
 		Child: tracks_opts_m,
@@ -223,7 +231,7 @@ func main() {
 			}
 			viewModel.Playlists = append(viewModel.Playlists, playlist)
 
-			v.Next().Current().(*Menu).Set(playlistLabels())
+			view.Next().Current().(*Menu).Set(playlistLabels())
 		},
 	})
 
@@ -237,7 +245,7 @@ func main() {
 			termui.KeyEnter: func(index int) {
 				viewModel.Playlist = viewModel.Playlists[index]
 
-				v.NextComponent().(*Menu).Set(trackLabels())
+				view.NextComponent().(*Menu).Set(trackLabels())
 			},
 		},
 	})
@@ -255,7 +263,7 @@ func main() {
 
 	d.Tick = func(items []string) {
 		download_list.Items = items
-		v.Render()
+		view.Render()
 	}
 
 	results_m := NewMenu(MenuConf{
@@ -267,8 +275,8 @@ func main() {
 				if len(viewModel.Results) > index {
 					viewModel.Result = viewModel.Results[index]
 
-					v.NextComponent().Show()
-					v.Next()
+					view.NextComponent().Show()
+					view.Next()
 				}
 			},
 		},
@@ -284,8 +292,8 @@ func main() {
 				termui.KeyEnter: func(index int) {
 					switch index {
 					case 0:
-						v.NextComponent().Show()
-						v.Next().Current().(*Menu).Set(playlistLabels())
+						view.NextComponent().Show()
+						view.Next().Current().(*Menu).Set(playlistLabels())
 					case 1:
 						exec.Command("open", viewModel.Result.Url).Run()
 					}
@@ -332,8 +340,8 @@ func main() {
 							d.Remove(title)
 						}()
 
-						v.Hide()
-						v.Hide()
+						view.Hide()
+						view.Hide()
 					},
 				},
 			}),
@@ -346,7 +354,7 @@ func main() {
 		Height: 3,
 		Y:      HEIGHT + menuY,
 		OnSubmit: func(value string) {
-			next := v.NextComponent()
+			next := view.NextComponent()
 			go func() {
 				res, err := search.Do(value, 20)
 				if err != nil {
@@ -355,22 +363,21 @@ func main() {
 				viewModel.Results = res
 
 				next.(*Menu).Set(resultLabels())
-				v.Render()
+				view.Render()
 			}()
 		},
 	})
 
-	current_track_input := NewInput(InputConf{
-		Label:       "playing",
-		DisplayOnly: true,
-		Width:       35,
-		Height:      3,
-		X:           30,
-	})
+	current_track_p := termui.NewPar("")
+	current_track_p.Border.Label = "playing"
+	current_track_p.Border.FgColor = termui.ColorBlack
+	current_track_p.Width = 35
+	current_track_p.Height = 3
+	current_track_p.X = 30
 
-	v = view.New(2, []interface{}{
+	view = v.New(2, []interface{}{
 		add_playlist_input,
-		current_track_input,
+		current_track_p,
 		playlist_m,
 		tracks_m,
 		search_input,
@@ -382,11 +389,11 @@ func main() {
 		for {
 			track := <-player.playch
 
-			current_track_input.Text = track.Name
-			v.Render()
+			current_track_p.Text = track.Name
+			view.Render()
 		}
 	}()
-	v.Run()
+	view.Run()
 }
 
 // walk reads the library folder and returns
@@ -418,10 +425,13 @@ func walk(root string) (ret []*Playlist) {
 			if c.IsDir() || strings.HasPrefix(c.Name(), ".") {
 				continue
 			}
+
+			pos, _ := strconv.ParseInt(c.Name()[:2], 10, 64)
 			p.Tracks = append(p.Tracks, &Track{
-				Name: strings.TrimSuffix(c.Name(), filepath.Ext(c.Name())),
+				Name: strings.TrimSuffix(c.Name()[3:], filepath.Ext(c.Name())),
 				Ext:  filepath.Ext(c.Name()),
 				Path: filepath.Join(root, p.Name, c.Name()),
+				Pos:  pos,
 			})
 		}
 		ret = append(ret, p)
@@ -430,8 +440,18 @@ func walk(root string) (ret []*Playlist) {
 }
 
 func download(url, dst string) (*Track, error) {
+	tracks, err := ioutil.ReadDir(dst)
+	if err != nil {
+		return nil, err
+	}
+
+	lastpos, _ := strconv.ParseInt(
+		tracks[len(tracks)-1].Name()[:2], 10, 64)
+	lastpos++
+
 	out, err := exec.Command("youtube-dl",
-		"-x", "--audio-format", "mp3", "-o", dst+"/%(title)s.%(ext)s",
+		"-x", "--audio-format", "mp3", "-o",
+		dst+"/"+fmt.Sprintf("%02d", lastpos)+" %(title)s.%(ext)s",
 		url).Output()
 	if err != nil {
 		return nil, err
@@ -442,10 +462,11 @@ func download(url, dst string) (*Track, error) {
 		_, file := filepath.Split(path)
 		ext := filepath.Ext(file)
 		return &Track{
-			Name: strings.TrimSuffix(file, ext),
+			Name: strings.TrimSuffix(file[3:], ext),
 			Ext:  ext,
 			Path: path,
-		}, nil
+			Pos:  lastpos,
+		}, err
 	}
 	return nil, errors.New("check output for error")
 }

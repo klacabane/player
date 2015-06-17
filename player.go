@@ -15,6 +15,7 @@ type Track struct {
 	Name string
 	Ext  string
 	Path string
+	Pos  int64
 }
 
 type AudioPlayer struct {

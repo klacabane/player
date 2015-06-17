@@ -18,6 +18,18 @@ type ViewModel struct {
 	result  int
 }
 
+func (vm *ViewModel) Playlists() []*Playlist {
+	return vm.playlists
+}
+
+func (vm *ViewModel) PlaylistNames() []string {
+	names := make([]string, len(vm.playlists))
+	for i, p := range vm.playlists {
+		names[i] = p.Name
+	}
+	return names
+}
+
 func (vm *ViewModel) Playlist() *Playlist { return nil }
 
 func (vm *ViewModel) Track() *Track { return nil }
