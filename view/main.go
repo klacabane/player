@@ -146,11 +146,9 @@ func (v *View) Run() {
 
 		if e.Type == termui.EventKey && e.Ch == 'q' {
 			d, ok := v.Current().(Disposable)
-			if ok {
-				if d.Hideable() {
-					d.Destroy()
-					v.Prev()
-				}
+			if ok && d.Hideable() {
+				d.Destroy()
+				v.Prev()
 			} else {
 				v.Current().Handle(e)
 			}

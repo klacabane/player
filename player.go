@@ -19,7 +19,7 @@ type Track struct {
 
 type AudioPlayer struct {
 	Repeat bool
-	OnPlay func(*Track)
+	playch chan *Track
 
 	cmd *exec.Cmd
 
@@ -36,11 +36,7 @@ func (ap *AudioPlayer) play() {
 		return
 	}
 
-	go func() {
-		if ap.OnPlay != nil {
-			ap.OnPlay(track)
-		}
-	}()
+	ap.playch <- track
 
 	state, err := ap.cmd.Process.Wait()
 	if err != nil || !state.Success() {

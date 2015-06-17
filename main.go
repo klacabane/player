@@ -16,7 +16,8 @@ import (
 )
 
 var (
-	Player     = new(AudioPlayer)
+	player *AudioPlayer
+
 	data_dir   = "/Users/wopa/Dropbox/player/data/"
 	reFilename = regexp.MustCompile(":(.*).mp3")
 )
@@ -61,7 +62,9 @@ func main() {
 		panic(err)
 	}
 	defer termui.Close()
-	defer Player.Stop()
+
+	player = &AudioPlayer{playch: make(chan *Track, 1)}
+	defer player.Stop()
 
 	viewModel.Playlists = walk(data_dir)
 
@@ -186,7 +189,7 @@ func main() {
 				if viewModel.Playlist == nil {
 					return
 				}
-				Player.Init(viewModel.Playlist.Tracks, index)
+				player.Init(viewModel.Playlist.Tracks, index)
 			},
 		},
 		Ch: map[rune]MenuFn{
@@ -375,11 +378,14 @@ func main() {
 		download_list,
 	})
 
-	Player.OnPlay = func(track *Track) {
-		current_track_input.Text = track.Name
-		v.Render()
-	}
+	go func() {
+		for {
+			track := <-player.playch
 
+			current_track_input.Text = track.Name
+			v.Render()
+		}
+	}()
 	v.Run()
 }
 
