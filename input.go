@@ -1,6 +1,8 @@
 package main
 
 import (
+	"strings"
+
 	"github.com/gizak/termui"
 	"github.com/klacabane/player/view"
 )
@@ -52,8 +54,10 @@ func (c *Input) Focus(focus bool) {
 }
 func (c *Input) Handle(e termui.Event) {
 	if e.Key == termui.KeyEnter {
-		c.OnSubmit(c.Text)
-		c.Text = ""
+		if value := strings.TrimSpace(c.Text); len(value) > 0 {
+			c.OnSubmit(c.Text)
+			c.Text = ""
+		}
 		return
 	}
 	if e.Key == termui.KeySpace {

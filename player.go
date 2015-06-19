@@ -5,19 +5,6 @@ import (
 	"syscall"
 )
 
-type Playlist struct {
-	Name   string
-	Path   string
-	Tracks []*Track
-}
-
-type Track struct {
-	Name string
-	Ext  string
-	Path string
-	Pos  int64
-}
-
 type AudioPlayer struct {
 	Repeat bool
 	playch chan *Track

@@ -17,46 +17,12 @@ import (
 )
 
 var (
-	player *AudioPlayer
+	viewModel *ViewModel
+	player    *AudioPlayer
 
 	data_dir   = "/Users/wopa/Dropbox/player/data/"
 	reFilename = regexp.MustCompile(":(.*).mp3")
 )
-
-var viewModel struct {
-	Playlists []*Playlist
-	Playlist  *Playlist
-	Track     *Track
-
-	Results []search.Result
-	Result  search.Result
-
-	Downloads []string
-}
-
-func playlistLabels() []string {
-	names := make([]string, len(viewModel.Playlists))
-	for i, p := range viewModel.Playlists {
-		names[i] = p.Name
-	}
-	return names
-}
-
-func trackLabels() []string {
-	names := make([]string, len(viewModel.Playlist.Tracks))
-	for i, t := range viewModel.Playlist.Tracks {
-		names[i] = t.Name
-	}
-	return names
-}
-
-func resultLabels() []string {
-	names := make([]string, len(viewModel.Results))
-	for i, r := range viewModel.Results {
-		names[i] = r.Title
-	}
-	return names
-}
 
 func main() {
 	if err := termui.Init(); err != nil {
@@ -67,7 +33,9 @@ func main() {
 	player = &AudioPlayer{playch: make(chan *Track, 1)}
 	defer player.Stop()
 
-	viewModel.Playlists = walk(data_dir)
+	viewModel = &ViewModel{
+		Playlists: walk(data_dir),
+	}
 
 	menuY := 3
 
@@ -77,8 +45,8 @@ func main() {
 		Labels:   []string{"rename", "to playlist", "move", "delete"},
 		X:        65,
 		Y:        menuY,
-		Width:    15,
-		Height:   5,
+		Width:    18,
+		Height:   6,
 		Hideable: true,
 		Hide:     true,
 		Key: map[termui.Key]MenuFn{
@@ -87,52 +55,35 @@ func main() {
 					return
 				}
 
-				removeTrack := func() {
-					if len(viewModel.Playlist.Tracks) <= 1 {
-						viewModel.Playlist.Tracks = []*Track{}
-					} else {
-						var i int
-						for ; i < len(viewModel.Playlist.Tracks); i++ {
-							if viewModel.Track == viewModel.Playlist.Tracks[i] {
-								break
-							}
-						}
-						viewModel.Playlist.Tracks = append(viewModel.Playlist.Tracks[:i], viewModel.Playlist.Tracks[i+1:]...)
-					}
-					viewModel.Track = nil
-				}
-
 				switch index {
 				case 0:
+					// rename
 					view.Current().(*Menu).Child = NewInput(InputConf{
 						Height:   3,
 						Width:    20,
-						X:        80,
+						X:        83,
 						Y:        menuY,
 						Hideable: true,
 						OnSubmit: func(value string) {
-							newpath := filepath.Join(
-								filepath.Dir(viewModel.Track.Path),
-								fmt.Sprintf("%02d ", viewModel.Track.Pos)+value+viewModel.Track.Ext)
-							if err := os.Rename(viewModel.Track.Path, newpath); err != nil {
+							if err := viewModel.Track.Rename(viewModel.Track.Pos, value); err != nil {
 								fmt.Println(err)
 								return
 							}
-							viewModel.Track.Name = value
-							viewModel.Track.Path = newpath
 
 							view.Hide()
 							view.Hide()
-							view.Current().(*Menu).Set(trackLabels())
+							view.Current().(*Menu).
+								Set(viewModel.Tracks().Names())
 						},
 					})
 
 					view.Init(5)
 				case 1:
+					// to playlist
 					view.Current().(*Menu).Child = NewMenu(MenuConf{
-						Labels:   playlistLabels(),
+						Labels:   viewModel.Playlists.Names(),
 						Height:   HEIGHT,
-						X:        80,
+						X:        83,
 						Y:        menuY,
 						Width:    20,
 						Hideable: true,
@@ -143,44 +94,59 @@ func main() {
 								}
 
 								pdst := viewModel.Playlists[playlistIndex]
-								newpath := filepath.Join(pdst.Path,
-									fmt.Sprintf("%02d ", viewModel.Track.Pos)+
-										viewModel.Track.Name+viewModel.Track.Ext)
-								if newpath == viewModel.Track.Path {
+								if pdst == viewModel.Playlist {
 									return
 								}
 
-								if err := os.Rename(viewModel.Track.Path, newpath); err != nil {
+								if err := pdst.Add(viewModel.Track); err != nil {
+									return
+								}
+
+								if err := viewModel.Playlist.Remove(viewModel.Track); err != nil {
 									fmt.Println(err)
-									return
 								}
-								viewModel.Track.Path = newpath
-								pdst.Tracks = append(pdst.Tracks, viewModel.Track)
-
-								removeTrack()
+								viewModel.Track = nil
 
 								view.Hide()
 								view.Hide()
-								view.Current().(*Menu).Set(trackLabels())
+								view.Current().(*Menu).
+									Set(viewModel.Tracks().Names())
 							},
 						},
 					})
 
 					view.Init(5)
-				case 3:
-					// TODO: update position
-					// dropdown type
-					// OnSubmit val ->
-					// insert track at pos and move down [pos:]
 				case 2:
-					if err := os.Remove(viewModel.Track.Path); err != nil {
-						fmt.Println(err)
-						return
+					// move
+					child := NewCounter(len(viewModel.Tracks()))
+					child.X = 83
+					child.Y = menuY
+					child.OnSubmit = func(pos int) {
+						if err := viewModel.Playlist.Move(viewModel.Track, pos); err != nil {
+							fmt.Println(err)
+						}
+
+						view.Hide()
+						view.Hide()
+						view.Current().(*Menu).
+							Set(viewModel.Playlist.Tracks.Names())
+
+						view.Render()
 					}
-					removeTrack()
+					view.Current().(*Menu).Child = child
+
+					view.Init(5)
+
+				case 3:
+					// delete
+					if err := viewModel.Playlist.Remove(viewModel.Track); err != nil {
+						fmt.Println(err)
+					}
+					viewModel.Track = nil
 
 					view.Hide()
-					view.Current().(*Menu).Set(trackLabels())
+					view.Current().(*Menu).
+						Set(viewModel.Tracks().Names())
 				}
 			},
 		},
@@ -197,7 +163,7 @@ func main() {
 				if viewModel.Playlist == nil {
 					return
 				}
-				player.Init(viewModel.Playlist.Tracks, index)
+				player.Init(viewModel.Tracks(), index)
 			},
 		},
 		Ch: map[rune]MenuFn{
@@ -205,7 +171,7 @@ func main() {
 				if viewModel.Playlist == nil {
 					return
 				}
-				viewModel.Track = viewModel.Playlist.Tracks[index]
+				viewModel.SetTrack(index)
 
 				view.NextComponent().Show()
 				view.Next()
@@ -231,40 +197,35 @@ func main() {
 			}
 			viewModel.Playlists = append(viewModel.Playlists, playlist)
 
-			view.Next().Current().(*Menu).Set(playlistLabels())
+			view.Next().
+				Current().(*Menu).
+				Set(viewModel.Playlists.Names())
 		},
 	})
 
 	playlist_m := NewMenu(MenuConf{
 		Title:  "playlists",
-		Labels: playlistLabels(),
+		Labels: viewModel.Playlists.Names(),
 		Width:  30,
 		Height: HEIGHT,
 		Y:      menuY,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
-				viewModel.Playlist = viewModel.Playlists[index]
+				viewModel.SetPlaylist(index)
 
-				view.NextComponent().(*Menu).Set(trackLabels())
+				view.NextComponent().(*Menu).Set(viewModel.Tracks().Names())
 			},
 		},
 	})
 
-	download_list := termui.NewList()
-	download_list.Y = HEIGHT + 20
-	download_list.Height = HEIGHT
-	download_list.Width = 30
-	download_list.HasBorder = false
-
-	d := &Downloads{
-		addc:    make(chan string, 1),
-		removec: make(chan string, 1),
-	}
-
-	d.Tick = func(items []string) {
-		download_list.Items = items
+	download_list := NewObservable()
+	download_list.Tick = func() {
 		view.Render()
 	}
+	download_list.Y = HEIGHT + 20
+	download_list.Width = 40
+	download_list.Height = HEIGHT
+	download_list.HasBorder = false
 
 	results_m := NewMenu(MenuConf{
 		Y:      HEIGHT + 3 + menuY,
@@ -273,7 +234,7 @@ func main() {
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
 				if len(viewModel.Results) > index {
-					viewModel.Result = viewModel.Results[index]
+					viewModel.SetResult(index)
 
 					view.NextComponent().Show()
 					view.Next()
@@ -293,7 +254,7 @@ func main() {
 					switch index {
 					case 0:
 						view.NextComponent().Show()
-						view.Next().Current().(*Menu).Set(playlistLabels())
+						view.Next().Current().(*Menu).Set(viewModel.Playlists.Names())
 					case 1:
 						exec.Command("open", viewModel.Result.Url).Run()
 					}
@@ -308,10 +269,10 @@ func main() {
 				Height:   HEIGHT,
 				Key: map[termui.Key]MenuFn{
 					termui.KeyEnter: func(index int) {
-						playlist := viewModel.Playlists[index]
+						playlist := viewModel.Playlist
 						title := viewModel.Result.Title
 
-						d.Add(title)
+						download_list.Add(title)
 						go func() {
 							errc := make(chan error, 1)
 							trackc := make(chan *Track, 1)
@@ -337,7 +298,7 @@ func main() {
 									break out
 								}
 							}
-							d.Remove(title)
+							download_list.Remove(title)
 						}()
 
 						view.Hide()
@@ -362,7 +323,7 @@ func main() {
 				}
 				viewModel.Results = res
 
-				next.(*Menu).Set(resultLabels())
+				next.(*Menu).Set(viewModel.Results.Names())
 				view.Render()
 			}()
 		},
@@ -393,6 +354,7 @@ func main() {
 			view.Render()
 		}
 	}()
+
 	view.Run()
 }
 
@@ -431,7 +393,7 @@ func walk(root string) (ret []*Playlist) {
 				Name: strings.TrimSuffix(c.Name()[3:], filepath.Ext(c.Name())),
 				Ext:  filepath.Ext(c.Name()),
 				Path: filepath.Join(root, p.Name, c.Name()),
-				Pos:  pos,
+				Pos:  int(pos),
 			})
 		}
 		ret = append(ret, p)
@@ -465,7 +427,7 @@ func download(url, dst string) (*Track, error) {
 			Name: strings.TrimSuffix(file[3:], ext),
 			Ext:  ext,
 			Path: path,
-			Pos:  lastpos,
+			Pos:  int(lastpos),
 		}, err
 	}
 	return nil, errors.New("check output for error")

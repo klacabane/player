@@ -2,105 +2,167 @@ package main
 
 import (
 	"fmt"
-	"time"
+	"os"
+	"path/filepath"
+	"sort"
 
 	"github.com/klacabane/player/search"
 )
 
 type ViewModel struct {
-	playlists []*Playlist
-	playlist  int
+	Playlists Playlists
 
-	tracks []*Track
-	track  int
+	Playlist *Playlist
+	Track    *Track
 
-	results []search.Result
-	result  int
+	Results Results
+	Result  search.Result
 }
 
-func (vm *ViewModel) Playlists() []*Playlist {
-	return vm.playlists
+func (vm *ViewModel) SetTrack(i int) {
+	vm.Track = vm.Playlist.Tracks[i]
 }
 
-func (vm *ViewModel) PlaylistNames() []string {
-	names := make([]string, len(vm.playlists))
-	for i, p := range vm.playlists {
-		names[i] = p.Name
+func (vm *ViewModel) SetPlaylist(i int) {
+	vm.Playlist = vm.Playlists[i]
+}
+
+func (vm *ViewModel) SetResult(i int) {
+	vm.Result = vm.Results[i]
+}
+
+func (vm *ViewModel) Tracks() Tracks {
+	return vm.Playlist.Tracks
+}
+
+type Playlist struct {
+	Name   string
+	Path   string
+	Tracks Tracks
+}
+
+func (p *Playlist) Add(track *Track) error {
+	nextpos := p.Tracks[len(p.Tracks)-1].Pos + 1
+	newpath := filepath.Join(
+		p.Path,
+		fmt.Sprintf("%02d ", nextpos)+track.Name+track.Ext)
+	err := os.Rename(track.Path, newpath)
+	if err != nil {
+		return err
+	}
+
+	track.Pos = nextpos
+	track.Path = newpath
+
+	p.Tracks = append(p.Tracks, track)
+	return nil
+}
+
+func (p *Playlist) Move(track *Track, to int) error {
+	var placeholder *Track
+	for _, t := range p.Tracks {
+		if t.Pos == to {
+			placeholder = t
+			break
+		}
+	}
+
+	if placeholder != nil {
+		if err := placeholder.Rename(track.Pos, placeholder.Name); err != nil {
+			return err
+		}
+	}
+
+	if err := track.Rename(to, track.Name); err != nil {
+		return err
+	}
+	sort.Sort(p.Tracks)
+	return nil
+}
+
+func (p *Playlist) Remove(track *Track) (err error) {
+	if len(p.Tracks) == 1 {
+		p.Tracks = []*Track{}
+	} else {
+		var i int
+		for ; i < len(p.Tracks); i++ {
+			if track == p.Tracks[i] {
+				break
+			}
+		}
+
+		for _, track := range p.Tracks[i+1:] {
+			if err = track.Rename(track.Pos-1, track.Name); err != nil {
+				return err
+			}
+		}
+		p.Tracks = append(p.Tracks[:i], p.Tracks[i+1:]...)
+	}
+	return track.Remove()
+}
+
+type Track struct {
+	Name string
+	Ext  string
+	Path string
+	Pos  int
+}
+
+func (t *Track) Rename(pos int, name string) error {
+	newpath := filepath.Join(
+		filepath.Dir(t.Path),
+		fmt.Sprintf("%02d ", pos)+name+t.Ext)
+
+	err := os.Rename(t.Path, newpath)
+	if err != nil {
+		return err
+	}
+	t.Path = newpath
+	t.Name = name
+	t.Pos = pos
+	return nil
+}
+
+func (t *Track) Remove() error {
+	return os.Remove(t.Path)
+}
+
+type Playlists []*Playlist
+
+func (p Playlists) Names() []string {
+	names := make([]string, len(p))
+	for i, playlist := range p {
+		names[i] = playlist.Name
 	}
 	return names
 }
 
-func (vm *ViewModel) Playlist() *Playlist { return nil }
+type Tracks []*Track
 
-func (vm *ViewModel) Track() *Track { return nil }
-
-type Downloads struct {
-	Tick func([]string)
-
-	addc    chan string
-	removec chan string
-
-	items []string
-}
-
-func (d *Downloads) run() {
-	for {
-		select {
-		case item := <-d.addc:
-			d.items = append(d.items, fmt.Sprintf(" | %s", item))
-		case item := <-d.removec:
-			d.remove(item)
-		case <-time.After(1 * time.Second):
-			if len(d.items) == 0 {
-				return
-			}
-			d.update()
-		}
-		d.Tick(d.items)
+func (t Tracks) Names() []string {
+	names := make([]string, len(t))
+	for i, track := range t {
+		names[i] = track.Name
 	}
+	return names
 }
 
-func (d *Downloads) Add(name string) {
-	d.addc <- name
-	if len(d.items) == 0 {
-		go d.run()
+func (t Tracks) Len() int { return len(t) }
+
+func (t Tracks) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
+}
+
+func (t Tracks) Less(i, j int) bool {
+	return t[i].Pos < t[j].Pos
+}
+
+type Results []search.Result
+
+func (r Results) Names() []string {
+	names := make([]string, len(r))
+	for i, result := range r {
+		names[i] = result.Title
 	}
-}
-
-func (d *Downloads) Remove(name string) {
-	d.removec <- name
-}
-
-func (d *Downloads) remove(name string) {
-	var items []string
-	for _, item := range d.items {
-		if item[3:] == name {
-			continue
-		}
-		items = append(items, item)
-	}
-	d.items = items
-}
-
-func (d *Downloads) Items() []string {
-	return d.items
-}
-
-func (d *Downloads) update() {
-	var items []string
-	for i := 0; i < len(d.items); i++ {
-		var state rune
-		switch d.items[i][1] {
-		case '|':
-			state = '/'
-		case '/':
-			state = '-'
-		case '-':
-			state = '\\'
-		case '\\':
-			state = '|'
-		}
-		items = append(items, fmt.Sprintf(" %s %s", string(state), d.items[i][3:]))
-	}
-	d.items = items
+	return names
 }
