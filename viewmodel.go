@@ -59,16 +59,16 @@ func (p *Playlist) Add(track *Track) error {
 }
 
 func (p *Playlist) Move(track *Track, to int) error {
-	var placeholder *Track
+	var swap *Track
 	for _, t := range p.Tracks {
 		if t.Pos == to {
-			placeholder = t
+			swap = t
 			break
 		}
 	}
 
-	if placeholder != nil {
-		if err := placeholder.Rename(track.Pos, placeholder.Name); err != nil {
+	if swap != nil {
+		if err := swap.Rename(track.Pos, swap.Name); err != nil {
 			return err
 		}
 	}

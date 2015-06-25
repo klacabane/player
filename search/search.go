@@ -1,6 +1,8 @@
 package search
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"code.google.com/p/google-api-go-client/googleapi/transport"
@@ -9,12 +11,14 @@ import (
 
 const API_KEY = "AIzaSyBIM-dPY4ky7YAk4jLSgkf4axlTzzvFSlU"
 
+const REDDIT_EP = "http://reddit.com/r/%s/hot.json"
+
 type Result struct {
 	Url   string
 	Title string
 }
 
-func Do(term string, max int64) ([]Result, error) {
+func Youtube(term string, max int64) ([]Result, error) {
 	client := &http.Client{
 		Transport: &transport.APIKey{Key: API_KEY},
 	}
@@ -40,4 +44,33 @@ func Do(term string, max int64) ([]Result, error) {
 		}
 	}
 	return ret, nil
+}
+
+func Reddit(sub string) ([]Result, error) {
+	res, err := http.Get(fmt.Sprintf(REDDIT_EP, sub))
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Kind string
+		Data struct {
+			Modhash  string
+			Children []struct {
+				Kind string
+				Data struct {
+					Result
+					Domain string
+				}
+			}
+		}
+	}
+
+	var ret []Result
+	err = json.NewDecoder(res.Body).Decode(&result)
+	for _, child := range result.Data.Children {
+		child.Data.Title = fmt.Sprintf("%s\n%s", child.Data.Title, child.Data.Domain)
+		ret = append(ret, child.Data.Result)
+	}
+	return ret, err
 }

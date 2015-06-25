@@ -31,7 +31,7 @@ func (ap *AudioPlayer) play() {
 		return
 	} else {
 		// song played entirely
-		// end of playlist
+		// end of track list
 		if ap.current == len(ap.tracks)-1 {
 			ap.Stop()
 			return

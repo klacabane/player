@@ -70,8 +70,7 @@ func main() {
 								return
 							}
 
-							view.Hide()
-							view.Hide()
+							view.Prev().Hide()
 							view.Current().(*Menu).
 								Set(viewModel.Tracks().Names())
 						},
@@ -107,8 +106,7 @@ func main() {
 								}
 								viewModel.Track = nil
 
-								view.Hide()
-								view.Hide()
+								view.Prev().Hide()
 								view.Current().(*Menu).
 									Set(viewModel.Tracks().Names())
 							},
@@ -126,8 +124,7 @@ func main() {
 							fmt.Println(err)
 						}
 
-						view.Hide()
-						view.Hide()
+						view.Prev().Hide()
 						view.Current().(*Menu).
 							Set(viewModel.Playlist.Tracks.Names())
 
@@ -254,7 +251,8 @@ func main() {
 					switch index {
 					case 0:
 						view.NextComponent().Show()
-						view.Next().Current().(*Menu).Set(viewModel.Playlists.Names())
+						view.Next().Current().(*Menu).
+							Set(viewModel.Playlists.Names())
 					case 1:
 						exec.Command("open", viewModel.Result.Url).Run()
 					}
@@ -269,7 +267,7 @@ func main() {
 				Height:   HEIGHT,
 				Key: map[termui.Key]MenuFn{
 					termui.KeyEnter: func(index int) {
-						playlist := viewModel.Playlist
+						playlist := viewModel.Playlists[index]
 						title := viewModel.Result.Title
 
 						download_list.Add(title)
@@ -317,7 +315,7 @@ func main() {
 		OnSubmit: func(value string) {
 			next := view.NextComponent()
 			go func() {
-				res, err := search.Do(value, 20)
+				res, err := search.Youtube(value, 20)
 				if err != nil {
 					return
 				}
@@ -336,6 +334,35 @@ func main() {
 	current_track_p.Height = 3
 	current_track_p.X = 30
 
+	var redditRes []search.Result
+	hhh_m := NewMenu(MenuConf{
+		Width:  30,
+		Height: HEIGHT,
+		Y:      34,
+		X:      40,
+		Key: map[termui.Key]MenuFn{
+			termui.KeyEnter: func(index int) {
+				exec.Command("open", redditRes[index].Url).Run()
+			},
+		},
+		Ch: map[rune]MenuFn{
+			'r': func(index int) {
+				res, err := search.Reddit("hiphopheads")
+				if err != nil {
+					fmt.Println(err)
+					return
+				}
+				redditRes = res
+
+				names := make([]string, len(res))
+				for i, result := range res {
+					names[i] = result.Title
+				}
+				view.Current().(*Menu).Set(names)
+			},
+		},
+	})
+
 	view = v.New(2, []interface{}{
 		add_playlist_input,
 		current_track_p,
@@ -344,6 +371,7 @@ func main() {
 		search_input,
 		results_m,
 		download_list,
+		hhh_m,
 	})
 
 	go func() {
