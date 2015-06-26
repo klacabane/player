@@ -12,13 +12,14 @@ type Observable struct {
 	addc    chan string
 	removec chan string
 
-	Tick func()
+	Tick chan struct{}
 }
 
 func NewObservable() *Observable {
 	l := &Observable{List: termui.NewList()}
 	l.addc = make(chan string, 1)
 	l.removec = make(chan string, 1)
+	l.Tick = make(chan struct{}, 1)
 	return l
 }
 
@@ -35,7 +36,7 @@ func (d *Observable) run() {
 			}
 			d.update()
 		}
-		d.Tick()
+		d.Tick <- struct{}{}
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,25 +18,31 @@ import (
 )
 
 var (
-	viewModel *ViewModel
-	player    *AudioPlayer
+	vm *ViewModel
 
 	data_dir   = "/Users/wopa/Dropbox/player/data/"
 	reFilename = regexp.MustCompile(":(.*).mp3")
 )
 
+func init() {
+	logf, err := os.OpenFile("log.txt", os.O_WRONLY|os.O_CREATE, 0640)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	log.SetOutput(logf)
+}
+
 func main() {
 	if err := termui.Init(); err != nil {
-		panic(err)
+		log.Fatalln(err)
 	}
 	defer termui.Close()
 
-	player = &AudioPlayer{playch: make(chan *Track, 1)}
-	defer player.Stop()
-
-	viewModel = &ViewModel{
+	vm = &ViewModel{
 		Playlists: walk(data_dir),
+		Player:    &AudioPlayer{playch: make(chan *Track, 1)},
 	}
+	defer vm.Player.Stop()
 
 	menuY := 3
 
@@ -51,7 +58,7 @@ func main() {
 		Hide:     true,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
-				if viewModel.Track == nil {
+				if vm.Track == nil {
 					return
 				}
 
@@ -65,14 +72,14 @@ func main() {
 						Y:        menuY,
 						Hideable: true,
 						OnSubmit: func(value string) {
-							if err := viewModel.Track.Rename(viewModel.Track.Pos, value); err != nil {
-								fmt.Println(err)
+							if err := vm.Track.Rename(vm.Track.Pos, value); err != nil {
+								log.Println("rename: couldnt rename track:", err)
 								return
 							}
 
 							view.Prev().Hide()
 							view.Current().(*Menu).
-								Set(viewModel.Tracks().Names())
+								Set(vm.Tracks().Names())
 						},
 					})
 
@@ -80,7 +87,7 @@ func main() {
 				case 1:
 					// to playlist
 					view.Current().(*Menu).Child = NewMenu(MenuConf{
-						Labels:   viewModel.Playlists.Names(),
+						Labels:   vm.Playlists.Names(),
 						Height:   HEIGHT,
 						X:        83,
 						Y:        menuY,
@@ -88,27 +95,28 @@ func main() {
 						Hideable: true,
 						Key: map[termui.Key]MenuFn{
 							termui.KeyEnter: func(playlistIndex int) {
-								if viewModel.Track == nil {
+								if vm.Track == nil {
 									return
 								}
 
-								pdst := viewModel.Playlists[playlistIndex]
-								if pdst == viewModel.Playlist {
+								pdst := vm.Playlists[playlistIndex]
+								if pdst == vm.Playlist {
 									return
 								}
 
-								if err := pdst.Add(viewModel.Track); err != nil {
+								if err := pdst.Add(vm.Track); err != nil {
+									log.Println("to playlist: couldnt add track to playlist:", err)
 									return
 								}
 
-								if err := viewModel.Playlist.Remove(viewModel.Track); err != nil {
-									fmt.Println(err)
+								if err := vm.Playlist.Remove(vm.Track); err != nil {
+									log.Println("to playlist: couldnt remove track from playlist:", err)
 								}
-								viewModel.Track = nil
+								vm.Track = nil
 
 								view.Prev().Hide()
 								view.Current().(*Menu).
-									Set(viewModel.Tracks().Names())
+									Set(vm.Tracks().Names())
 							},
 						},
 					})
@@ -116,17 +124,17 @@ func main() {
 					view.Init(5)
 				case 2:
 					// move
-					child := NewCounter(len(viewModel.Tracks()))
+					child := NewCounter(len(vm.Tracks()))
 					child.X = 83
 					child.Y = menuY
 					child.OnSubmit = func(pos int) {
-						if err := viewModel.Playlist.Move(viewModel.Track, pos); err != nil {
-							fmt.Println(err)
+						if err := vm.Playlist.Move(vm.Track, pos); err != nil {
+							log.Println("move: couldnt move track:", err)
 						}
 
 						view.Prev().Hide()
 						view.Current().(*Menu).
-							Set(viewModel.Playlist.Tracks.Names())
+							Set(vm.Playlist.Tracks.Names())
 
 						view.Render()
 					}
@@ -136,14 +144,14 @@ func main() {
 
 				case 3:
 					// delete
-					if err := viewModel.Playlist.Remove(viewModel.Track); err != nil {
-						fmt.Println(err)
+					if err := vm.Playlist.Remove(vm.Track); err != nil {
+						log.Println("delete: couldnt remove track:", err)
 					}
-					viewModel.Track = nil
+					vm.Track = nil
 
 					view.Hide()
 					view.Current().(*Menu).
-						Set(viewModel.Tracks().Names())
+						Set(vm.Tracks().Names())
 				}
 			},
 		},
@@ -157,18 +165,18 @@ func main() {
 		Height: HEIGHT,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
-				if viewModel.Playlist == nil {
+				if vm.Playlist == nil {
 					return
 				}
-				player.Init(viewModel.Tracks(), index)
+				vm.Player.Init(vm.Tracks(), index)
 			},
 		},
 		Ch: map[rune]MenuFn{
 			'o': func(index int) {
-				if viewModel.Playlist == nil {
+				if vm.Playlist == nil {
 					return
 				}
-				viewModel.SetTrack(index)
+				vm.SetTrack(index)
 
 				view.NextComponent().Show()
 				view.Next()
@@ -189,36 +197,34 @@ func main() {
 
 			err := os.Mkdir(playlist.Path, os.ModePerm)
 			if err != nil {
-				fmt.Println(err)
+				log.Println("add_playlist_input: couldnt mkdir:", err)
 				return
 			}
-			viewModel.Playlists = append(viewModel.Playlists, playlist)
+			vm.Playlists = append(vm.Playlists, playlist)
 
 			view.Next().
 				Current().(*Menu).
-				Set(viewModel.Playlists.Names())
+				Set(vm.Playlists.Names())
 		},
 	})
 
 	playlist_m := NewMenu(MenuConf{
 		Title:  "playlists",
-		Labels: viewModel.Playlists.Names(),
+		Labels: vm.Playlists.Names(),
 		Width:  30,
 		Height: HEIGHT,
 		Y:      menuY,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
-				viewModel.SetPlaylist(index)
+				vm.SetPlaylist(index)
 
-				view.NextComponent().(*Menu).Set(viewModel.Tracks().Names())
+				view.NextComponent().(*Menu).
+					Set(vm.Tracks().Names())
 			},
 		},
 	})
 
 	download_list := NewObservable()
-	download_list.Tick = func() {
-		view.Render()
-	}
 	download_list.Y = HEIGHT + 20
 	download_list.Width = 40
 	download_list.Height = HEIGHT
@@ -230,8 +236,8 @@ func main() {
 		Height: HEIGHT,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
-				if len(viewModel.Results) > index {
-					viewModel.SetResult(index)
+				if len(vm.Results) > index {
+					vm.SetResult(index)
 
 					view.NextComponent().Show()
 					view.Next()
@@ -252,9 +258,9 @@ func main() {
 					case 0:
 						view.NextComponent().Show()
 						view.Next().Current().(*Menu).
-							Set(viewModel.Playlists.Names())
+							Set(vm.Playlists.Names())
 					case 1:
-						exec.Command("open", viewModel.Result.Url).Run()
+						exec.Command("open", vm.Result.Url).Run()
 					}
 				},
 			},
@@ -267,8 +273,8 @@ func main() {
 				Height:   HEIGHT,
 				Key: map[termui.Key]MenuFn{
 					termui.KeyEnter: func(index int) {
-						playlist := viewModel.Playlists[index]
-						title := viewModel.Result.Title
+						playlist := vm.Playlists[index]
+						title := vm.Result.Title
 
 						download_list.Add(title)
 						go func() {
@@ -276,7 +282,7 @@ func main() {
 							trackc := make(chan *Track, 1)
 							go func() {
 								track, err := download(
-									viewModel.Result.Url,
+									vm.Result.Url,
 									playlist.Path)
 								if err != nil {
 									errc <- err
@@ -285,16 +291,11 @@ func main() {
 								trackc <- track
 							}()
 
-						out:
-							for {
-								select {
-								case track := <-trackc:
-									playlist.Tracks = append(playlist.Tracks, track)
-									break out
-								case err := <-errc:
-									fmt.Println(err)
-									break out
-								}
+							select {
+							case track := <-trackc:
+								playlist.Tracks = append(playlist.Tracks, track)
+							case err := <-errc:
+								log.Println("track download:", err)
 							}
 							download_list.Remove(title)
 						}()
@@ -317,11 +318,12 @@ func main() {
 			go func() {
 				res, err := search.Youtube(value, 20)
 				if err != nil {
+					log.Println("youtube search:", err)
 					return
 				}
-				viewModel.Results = res
+				vm.Results = res
 
-				next.(*Menu).Set(viewModel.Results.Names())
+				next.(*Menu).Set(vm.Results.Names())
 				view.Render()
 			}()
 		},
@@ -349,7 +351,7 @@ func main() {
 			'r': func(index int) {
 				res, err := search.Reddit("hiphopheads")
 				if err != nil {
-					fmt.Println(err)
+					log.Println("reddit search:", err)
 					return
 				}
 				redditRes = res
@@ -376,9 +378,12 @@ func main() {
 
 	go func() {
 		for {
-			track := <-player.playch
+			select {
+			case track := <-vm.Player.playch:
+				current_track_p.Text = track.Name
+			case <-download_list.Tick:
+			}
 
-			current_track_p.Text = track.Name
 			view.Render()
 		}
 	}()

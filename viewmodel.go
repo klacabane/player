@@ -17,6 +17,8 @@ type ViewModel struct {
 
 	Results Results
 	Result  search.Result
+
+	Player *AudioPlayer
 }
 
 func (vm *ViewModel) SetTrack(i int) {
