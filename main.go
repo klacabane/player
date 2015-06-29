@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -83,7 +82,7 @@ func main() {
 						},
 					})
 
-					view.Init(5)
+					view.Init(4)
 				case 1:
 					// to playlist
 					view.Current().(*Menu).Child = NewMenu(MenuConf{
@@ -121,7 +120,7 @@ func main() {
 						},
 					})
 
-					view.Init(5)
+					view.Init(4)
 				case 2:
 					// move
 					child := NewCounter(len(vm.Tracks()))
@@ -140,7 +139,7 @@ func main() {
 					}
 					view.Current().(*Menu).Child = child
 
-					view.Init(5)
+					view.Init(4)
 
 				case 3:
 					// delete
@@ -293,7 +292,7 @@ func main() {
 
 							select {
 							case track := <-trackc:
-								playlist.Tracks = append(playlist.Tracks, track)
+								playlist.Add(track)
 							case err := <-errc:
 								log.Println("track download:", err)
 							}
@@ -316,7 +315,7 @@ func main() {
 		OnSubmit: func(value string) {
 			next := view.NextComponent()
 			go func() {
-				res, err := search.Youtube(value, 20)
+				res, err := search.Youtube(value, 40)
 				if err != nil {
 					log.Println("youtube search:", err)
 					return
@@ -336,7 +335,7 @@ func main() {
 	current_track_p.Height = 3
 	current_track_p.X = 30
 
-	var redditRes []search.Result
+	var redditRes Results
 	hhh_m := NewMenu(MenuConf{
 		Width:  30,
 		Height: HEIGHT,
@@ -349,23 +348,22 @@ func main() {
 		},
 		Ch: map[rune]MenuFn{
 			'r': func(index int) {
-				res, err := search.Reddit("hiphopheads")
-				if err != nil {
-					log.Println("reddit search:", err)
-					return
-				}
-				redditRes = res
+				hhh := view.Current()
+				go func() {
+					res, err := search.Reddit("hiphopheads")
+					if err != nil {
+						log.Println("reddit search:", err)
+						return
+					}
+					redditRes = Results(res)
 
-				names := make([]string, len(res))
-				for i, result := range res {
-					names[i] = result.Title
-				}
-				view.Current().(*Menu).Set(names)
+					hhh.(*Menu).Set(redditRes.Names())
+				}()
 			},
 		},
 	})
 
-	view = v.New(2, []interface{}{
+	view = v.New(1, []interface{}{
 		add_playlist_input,
 		current_track_p,
 		playlist_m,
@@ -435,18 +433,9 @@ func walk(root string) (ret []*Playlist) {
 }
 
 func download(url, dst string) (*Track, error) {
-	tracks, err := ioutil.ReadDir(dst)
-	if err != nil {
-		return nil, err
-	}
-
-	lastpos, _ := strconv.ParseInt(
-		tracks[len(tracks)-1].Name()[:2], 10, 64)
-	lastpos++
-
 	out, err := exec.Command("youtube-dl",
 		"-x", "--audio-format", "mp3", "-o",
-		dst+"/"+fmt.Sprintf("%02d", lastpos)+" %(title)s.%(ext)s",
+		dst+"/%(title)s.%(ext)s",
 		url).Output()
 	if err != nil {
 		return nil, err
@@ -457,10 +446,9 @@ func download(url, dst string) (*Track, error) {
 		_, file := filepath.Split(path)
 		ext := filepath.Ext(file)
 		return &Track{
-			Name: strings.TrimSuffix(file[3:], ext),
+			Name: strings.TrimSuffix(file, ext),
 			Ext:  ext,
 			Path: path,
-			Pos:  int(lastpos),
 		}, err
 	}
 	return nil, errors.New("check output for error")

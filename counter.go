@@ -78,9 +78,7 @@ func (c *Counter) Destroy() {
 	c.Hide = true
 
 	if c.Child != nil {
-		if d, ok := c.Child.(view.Disposable); ok {
-			d.Destroy()
-		}
+		c.Child.Destroy()
 	}
 }
 

@@ -13,11 +13,7 @@ type Component interface {
 	Targetable() bool
 	Visible() bool
 	Show()
-}
-
-type Disposable interface {
 	Hideable() bool
-	Show()
 	Destroy()
 }
 
@@ -58,21 +54,17 @@ func (v *View) Init(start int) {
 			v.rcomponent = v.rcomponent.Link(r)
 		}
 	}
-	v.rcomponent = v.rcomponent.Move(start)
-	v.Current().Focus(true)
+	v.Move(start)
 }
 
 func (v *View) Move(n int) {
-	v.Current().Focus(false)
-	for n > 0 {
+	for ; n > 0; n-- {
 		v.Next()
-		n--
 	}
-	v.Current().Focus(true)
 }
 
 func (v *View) Hide() {
-	v.Current().(Disposable).Destroy()
+	v.Current().Destroy()
 	v.Prev()
 }
 
@@ -145,9 +137,8 @@ func (v *View) Run() {
 		}
 
 		if e.Type == termui.EventKey && e.Ch == 'q' {
-			d, ok := v.Current().(Disposable)
-			if ok && d.Hideable() {
-				d.Destroy()
+			if v.Current().Hideable() {
+				v.Current().Destroy()
 				v.Prev()
 			} else {
 				v.Current().Handle(e)
