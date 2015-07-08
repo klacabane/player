@@ -20,7 +20,7 @@ var (
 	vm *ViewModel
 
 	data_dir   = "/Users/wopa/Dropbox/player/data/"
-	reFilename = regexp.MustCompile(":(.*).mp3")
+	reFilename = regexp.MustCompile(":\\s(.*.mp3)")
 )
 
 func init() {
@@ -43,14 +43,12 @@ func main() {
 	}
 	defer vm.Player.Stop()
 
-	menuY := 3
-
 	var view *v.View
 
 	tracks_opts_m := NewMenu(MenuConf{
 		Labels:   []string{"rename", "to playlist", "move", "delete"},
 		X:        65,
-		Y:        menuY,
+		Y:        3,
 		Width:    18,
 		Height:   6,
 		Hideable: true,
@@ -68,7 +66,7 @@ func main() {
 						Height:   3,
 						Width:    20,
 						X:        83,
-						Y:        menuY,
+						Y:        3,
 						Hideable: true,
 						OnSubmit: func(value string) {
 							if err := vm.Track.Rename(vm.Track.Pos, value); err != nil {
@@ -89,7 +87,7 @@ func main() {
 						Labels:   vm.Playlists.Names(),
 						Height:   HEIGHT,
 						X:        83,
-						Y:        menuY,
+						Y:        3,
 						Width:    20,
 						Hideable: true,
 						Key: map[termui.Key]MenuFn{
@@ -125,7 +123,7 @@ func main() {
 					// move
 					child := NewCounter(len(vm.Tracks()))
 					child.X = 83
-					child.Y = menuY
+					child.Y = 3
 					child.OnSubmit = func(pos int) {
 						if err := vm.Playlist.Move(vm.Track, pos); err != nil {
 							log.Println("move: couldnt move track:", err)
@@ -159,7 +157,7 @@ func main() {
 	tracks_m := NewMenu(MenuConf{
 		Title:  "tracks",
 		X:      30,
-		Y:      menuY,
+		Y:      3,
 		Width:  35,
 		Height: HEIGHT,
 		Key: map[termui.Key]MenuFn{
@@ -212,7 +210,7 @@ func main() {
 		Labels: vm.Playlists.Names(),
 		Width:  30,
 		Height: HEIGHT,
-		Y:      menuY,
+		Y:      3,
 		Key: map[termui.Key]MenuFn{
 			termui.KeyEnter: func(index int) {
 				vm.SetPlaylist(index)
@@ -230,7 +228,7 @@ func main() {
 	download_list.HasBorder = false
 
 	results_m := NewMenu(MenuConf{
-		Y:      HEIGHT + 3 + menuY,
+		Y:      HEIGHT + 3 + 3,
 		Width:  40,
 		Height: HEIGHT,
 		Key: map[termui.Key]MenuFn{
@@ -245,7 +243,7 @@ func main() {
 		},
 		Child: NewMenu(MenuConf{
 			Labels:   []string{"download", "open"},
-			Y:        HEIGHT + 3 + menuY,
+			Y:        HEIGHT + 3 + 3,
 			X:        40,
 			Width:    15,
 			Height:   4,
@@ -264,7 +262,7 @@ func main() {
 				},
 			},
 			Child: NewMenu(MenuConf{
-				Y:        HEIGHT + 3 + menuY,
+				Y:        HEIGHT + 3 + 3,
 				X:        55,
 				Width:    30,
 				Hideable: true,
@@ -307,11 +305,43 @@ func main() {
 		}),
 	})
 
-	search_input := NewInput(InputConf{
+	var searchTracks Tracks
+	_ = NewInput(InputConf{
 		Label:  "search",
+		Width:  30,
+		Height: 3,
+		X:      83,
+		OnSubmit: func(value string) {
+			searchTracks = Tracks{}
+			for _, playlist := range vm.Playlists {
+				for _, track := range playlist.Tracks {
+					if strings.Contains(strings.ToLower(track.Name), strings.ToLower(value)) {
+						searchTracks = append(searchTracks, track)
+					}
+				}
+			}
+
+			view.NextComponent().(*Menu).
+				Set(searchTracks.Names())
+		},
+		Child: NewMenu(MenuConf{
+			X:      83,
+			Y:      3,
+			Height: 10,
+			Width:  30,
+			Key: map[termui.Key]MenuFn{
+				termui.KeyEnter: func(index int) {
+					vm.Player.Init(searchTracks, index)
+				},
+			},
+		}),
+	})
+
+	search_yt_input := NewInput(InputConf{
+		Label:  "youtube",
 		Width:  40,
 		Height: 3,
-		Y:      HEIGHT + menuY,
+		Y:      HEIGHT + 3,
 		OnSubmit: func(value string) {
 			next := view.NextComponent()
 			go func() {
@@ -336,8 +366,9 @@ func main() {
 	current_track_p.X = 30
 
 	var redditRes Results
-	hhh_m := NewMenu(MenuConf{
-		Width:  30,
+	_ = NewMenu(MenuConf{
+		Title:  "hhh",
+		Width:  40,
 		Height: HEIGHT,
 		Y:      34,
 		X:      40,
@@ -358,6 +389,7 @@ func main() {
 					redditRes = Results(res)
 
 					hhh.(*Menu).Set(redditRes.Names())
+					view.Render()
 				}()
 			},
 		},
@@ -368,10 +400,9 @@ func main() {
 		current_track_p,
 		playlist_m,
 		tracks_m,
-		search_input,
+		search_yt_input,
 		results_m,
 		download_list,
-		hhh_m,
 	})
 
 	go func() {
@@ -389,11 +420,6 @@ func main() {
 	view.Run()
 }
 
-// walk reads the library folder and returns
-// the playlists it contains.
-// - root
-//  - playlist1
-//   - track1
 func walk(root string) (ret []*Playlist) {
 	finfos, err := ioutil.ReadDir(root)
 	if err != nil {
@@ -441,15 +467,15 @@ func download(url, dst string) (*Track, error) {
 		return nil, err
 	}
 
-	if b := reFilename.Find(out); len(b) > 2 {
-		path := string(b)[2:]
+	if m := reFilename.FindSubmatch(out); len(m) > 1 {
+		path := string(m[1])
 		_, file := filepath.Split(path)
 		ext := filepath.Ext(file)
 		return &Track{
 			Name: strings.TrimSuffix(file, ext),
 			Ext:  ext,
 			Path: path,
-		}, err
+		}, nil
 	}
-	return nil, errors.New("check output for error")
+	return nil, errors.New("couldnt find .mp3: " + string(out))
 }

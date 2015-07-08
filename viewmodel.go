@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/klacabane/player/search"
 )
@@ -38,12 +39,17 @@ func (vm *ViewModel) Tracks() Tracks {
 }
 
 type Playlist struct {
+	mu sync.Mutex
+
 	Name   string
 	Path   string
 	Tracks Tracks
 }
 
 func (p *Playlist) Add(track *Track) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	nextpos := p.Tracks[len(p.Tracks)-1].Pos + 1
 	newpath := filepath.Join(
 		p.Path,
@@ -61,6 +67,9 @@ func (p *Playlist) Add(track *Track) error {
 }
 
 func (p *Playlist) Move(track *Track, to int) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var swap *Track
 	for _, t := range p.Tracks {
 		if t.Pos == to {
@@ -83,6 +92,7 @@ func (p *Playlist) Move(track *Track, to int) error {
 }
 
 func (p *Playlist) Remove(track *Track) (err error) {
+	p.mu.Lock()
 	if len(p.Tracks) == 1 {
 		p.Tracks = []*Track{}
 	} else {
@@ -100,6 +110,8 @@ func (p *Playlist) Remove(track *Track) (err error) {
 		}
 		p.Tracks = append(p.Tracks[:i], p.Tracks[i+1:]...)
 	}
+	p.mu.Unlock()
+
 	return track.Remove()
 }
 

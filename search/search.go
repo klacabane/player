@@ -9,7 +9,7 @@ import (
 	"code.google.com/p/google-api-go-client/youtube/v3"
 )
 
-const API_KEY = "AIzaSyBIM-dPY4ky7YAk4jLSgkf4axlTzzvFSlU"
+const API_KEY = ""
 
 const REDDIT_EP = "http://reddit.com/r/%s/hot.json"
 
