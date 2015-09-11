@@ -93,6 +93,8 @@ func (p *Playlist) Move(track *Track, to int) error {
 
 func (p *Playlist) Remove(track *Track) (err error) {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	if len(p.Tracks) == 1 {
 		p.Tracks = []*Track{}
 	} else {
@@ -110,7 +112,6 @@ func (p *Playlist) Remove(track *Track) (err error) {
 		}
 		p.Tracks = append(p.Tracks[:i], p.Tracks[i+1:]...)
 	}
-	p.mu.Unlock()
 
 	return track.Remove()
 }
